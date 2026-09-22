@@ -378,15 +378,15 @@ export default function App() {
             <Button variant="outline" size="sm" className="h-9 w-9 p-0" onClick={() => setWeekOffset((o) => o + 1)} title="Next week">
               <ChevronRight className="w-4 h-4" />
             </Button>
-            <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border bg-[hsl(var(--surface-1))] text-xs text-muted-foreground cursor-pointer">
-              <CalendarDays className="w-3.5 h-3.5" />
-              Jump to
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border bg-[hsl(var(--surface-1))] text-xs text-muted-foreground">
+              <CalendarDays className="w-3.5 h-3.5 flex-shrink-0" />
+              <span>Jump to</span>
               <input
                 type="date"
-                className="bg-transparent text-xs outline-none"
+                className="bg-transparent text-xs outline-none border-0 w-28 text-foreground"
                 onChange={(e) => jumpToDate(e.target.value)}
               />
-            </label>
+            </div>
           </div>
 
           <div className="flex gap-1.5">
