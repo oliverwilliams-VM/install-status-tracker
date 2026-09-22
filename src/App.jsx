@@ -57,19 +57,18 @@ function deriveResourceAllocated(installerValue) {
 
 // A site is only ever flagged "at risk" while its outcome is still
 // pending (an already-resolved success or issue doesn't need a
-// before-the-fact warning) and its Install Day is imminent (today,
-// tomorrow, or the day after) \u2014 flagging something 3 weeks out as "at
-// risk" the same way as something happening tomorrow would just be
-// noise. Either trigger is enough on its own: Kick Off still reads as
-// not-yet-sent, or (for the 3 countries with a readiness form board) no
-// franchisee submission exists at all yet.
-function isAtRisk(site, now) {
-  if (!site.installDate) return false;
+// before-the-fact warning). Deliberately NOT gated by "days until
+// install relative to today" \u2014 that created exactly the kind of
+// inconsistency where two sites in the very same week's table, with
+// the identical missing-readiness-form problem, got different visual
+// treatment purely because one happened to fall a day or two closer to
+// today's real-world date. Every pending site in whatever week you're
+// currently viewing gets checked the same way. Either trigger is
+// enough on its own: Kick Off still reads as not-yet-sent, or (for the
+// 3 countries with a readiness form board) no franchisee submission
+// exists at all yet.
+function isAtRisk(site) {
   if (classifyInstallOutcome(site.installPhase) !== 'pending') return false;
-  const installDate = new Date(site.installDate);
-  const daysUntil = Math.ceil((installDate - now) / (1000 * 60 * 60 * 24));
-  if (daysUntil < 0 || daysUntil > 2) return false;
-
   const kickOffNotReady = /not|waiting/i.test(site.kickOff || '');
   const noReadinessForm = COUNTRIES_WITH_READINESS_BOARD.has(site.country) && !site.readiness;
   return kickOffNotReady || noReadinessForm;
@@ -243,7 +242,6 @@ export default function App() {
   // match (by site number) and its outcome/at-risk classification.
   const weekData = useMemo(() => {
     if (!items || !readinessByStoreId) return null;
-    const now = new Date();
 
     const inWeek = items.filter((item) => {
       if (!item.installDate) return false;
@@ -259,7 +257,7 @@ export default function App() {
       byCountry[item.country].push({
         ...enriched,
         outcome: classifyInstallOutcome(enriched.installPhase),
-        atRisk: isAtRisk(enriched, now)
+        atRisk: isAtRisk(enriched)
       });
     });
     Object.values(byCountry).forEach((list) => list.sort((a, b) => a.installDate.localeCompare(b.installDate)));
