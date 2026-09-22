@@ -14,6 +14,7 @@ export const COUNTRY_BOARDS = [
     country: 'UK',
     columns: {
       installDate: 'date',
+      installPhase: 'status',
       type: 'label4',
       kickOff: 'status__1',
       accessPermits: 'access_permits',
@@ -30,6 +31,7 @@ export const COUNTRY_BOARDS = [
     country: 'IE',
     columns: {
       installDate: 'date1__1',
+      installPhase: 'status__1',
       type: 'status1__1',
       kickOff: 'status5__1',
       accessPermits: null,
@@ -46,6 +48,7 @@ export const COUNTRY_BOARDS = [
     country: 'NL',
     columns: {
       installDate: 'date',
+      installPhase: 'status',
       type: 'dup__of_site_status__1',
       kickOff: 'status10__1',
       accessPermits: 'access_permits',
@@ -62,6 +65,7 @@ export const COUNTRY_BOARDS = [
     country: 'DE',
     columns: {
       installDate: 'date3',
+      installPhase: 'status',
       type: 'label1',
       kickOff: 'status9__1',
       accessPermits: 'access_permits',
@@ -78,6 +82,7 @@ export const COUNTRY_BOARDS = [
     country: 'FI',
     columns: {
       installDate: 'date',
+      installPhase: 'status',
       type: 'status1__1',
       kickOff: 'status8__1',
       accessPermits: 'access_permits',
@@ -120,4 +125,25 @@ export const READINESS_COLUMNS = {
 const AFFIRMATIVE_VALUES = new Set(['yes', 'ja', 'jaa']);
 export function isAffirmative(value) {
   return AFFIRMATIVE_VALUES.has((value || '').trim().toLowerCase());
+}
+
+// Classifies a site's overall outcome from its own "Install Phase" value.
+// Order matters: "issue" patterns are checked first because a few real
+// labels would otherwise false-match "success" (e.g. "Installed - Not
+// Live" contains "installed" but is genuinely a problem state, not a
+// completed install). Tested against every real label across all 5
+// boards before shipping this.
+export function classifyInstallOutcome(installPhase) {
+  const v = (installPhase || '').trim().toLowerCase();
+  if (!v) return 'pending';
+  if (
+    v.includes('cancel') || v.includes('deinstall') || v.includes('deiinstall') ||
+    v.includes('revisit') || v === 'stuck' || v.includes('not live') || v.includes('postponed')
+  ) {
+    return 'issue';
+  }
+  if (v.includes('complete') || v.includes('hypercare') || v === 'installed' || v.includes('live')) {
+    return 'success';
+  }
+  return 'pending';
 }

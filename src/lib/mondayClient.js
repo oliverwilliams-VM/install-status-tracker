@@ -32,6 +32,7 @@ function shapeCountryItem(rawItem, board) {
     country: board.country,
     group: rawItem.group?.title ?? null,
     installDate: get('installDate'),
+    installPhase: get('installPhase'),
     type: get('type'),
     kickOff: get('kickOff'),
     accessPermits: get('accessPermits'),

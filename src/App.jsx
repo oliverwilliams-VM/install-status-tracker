@@ -1,12 +1,16 @@
 import { useState, useEffect, useMemo } from 'react';
-import { RefreshCw, AlertCircle, Maximize2, Minimize2, Download } from 'lucide-react';
+import { RefreshCw, AlertCircle, AlertTriangle, Maximize2, Minimize2, Download, PieChart } from 'lucide-react';
 import { fetchCountryItems, fetchReadinessItems, updateCountryItemField } from './lib/mondayClient';
-import { COUNTRY_BOARDS, isAffirmative } from './lib/boards';
+import { translateTexts } from './lib/translate';
+import { COUNTRY_BOARDS, READINESS_BOARDS, isAffirmative, classifyInstallOutcome } from './lib/boards';
 import { Button } from './components/ui/button';
 
 const FLAGS = { UK: '\u{1F1EC}\u{1F1E7}', IE: '\u{1F1EE}\u{1F1EA}', NL: '\u{1F1F3}\u{1F1F1}', DE: '\u{1F1E9}\u{1F1EA}', FI: '\u{1F1EB}\u{1F1EE}' };
 const COUNTRY_ORDER = COUNTRY_BOARDS.map((b) => b.country);
+const COUNTRY_ACCENT = { UK: 'hsl(var(--chart-1))', IE: 'hsl(var(--chart-2))', NL: 'hsl(var(--chart-3))', DE: 'hsl(var(--chart-4))', FI: 'hsl(var(--chart-5))' };
+const COUNTRIES_WITH_READINESS_BOARD = new Set(READINESS_BOARDS.map((b) => b.country));
 const WEEKS_TO_SHOW = 4;
+const SUMMARY_TAB_KEY = '__summary__';
 
 // Monday of the week containing `date`.
 function mondayOf(date) {
@@ -41,6 +45,34 @@ function deriveResourceAllocated(installerValue) {
   return 'Yes';
 }
 
+// A site is only ever flagged "at risk" while its outcome is still
+// pending (an already-resolved success or issue doesn't need a
+// before-the-fact warning) and its Install Day is imminent (today,
+// tomorrow, or the day after) \u2014 flagging something 3 weeks out as "at
+// risk" the same way as something happening tomorrow would just be
+// noise. Three independent triggers, any one of which is enough:
+// Kick Off still reads as not-yet-sent, Resource Requested was never
+// set, or (for the 3 countries with a readiness form board) no
+// franchisee submission exists at all yet.
+function isAtRisk(site, now) {
+  if (!site.installDate) return false;
+  if (classifyInstallOutcome(site.installPhase) !== 'pending') return false;
+  const installDate = new Date(site.installDate);
+  const daysUntil = Math.ceil((installDate - now) / (1000 * 60 * 60 * 24));
+  if (daysUntil < 0 || daysUntil > 2) return false;
+
+  const kickOffNotReady = /not|waiting/i.test(site.kickOff || '');
+  const resourceMissing = !site.resourceRequested;
+  const noReadinessForm = COUNTRIES_WITH_READINESS_BOARD.has(site.country) && !site.readiness;
+  return kickOffNotReady || resourceMissing || noReadinessForm;
+}
+
+function outcomeRowStyle(outcome) {
+  if (outcome === 'success') return { backgroundColor: 'hsl(var(--status-complete) / 0.12)' };
+  if (outcome === 'issue') return { backgroundColor: 'hsl(var(--destructive) / 0.12)' };
+  return undefined;
+}
+
 function StatusPill({ value }) {
   if (value === null || value === undefined) {
     return <span className="text-xs text-muted-foreground">not tracked</span>;
@@ -67,7 +99,8 @@ export default function App() {
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [activeWeekKey, setActiveWeekKey] = useState(null);
+  const [activeTabKey, setActiveTabKey] = useState(null);
+  const [countryFilter, setCountryFilter] = useState('all');
 
   async function load() {
     setLoading(true);
@@ -77,11 +110,43 @@ export default function App() {
       setItems(countryData);
       setReadinessByStoreId(readinessData);
       setLastUpdated(new Date());
+      translateGermanNotes(readinessData);
     } catch (err) {
       console.error(err);
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Translation is a progressive enhancement, not a blocking step \u2014 the
+  // German notes are already shown as soon as the main fetch completes;
+  // this quietly swaps in English once it comes back, or leaves the
+  // German text in place if the translation call fails for any reason.
+  async function translateGermanNotes(readinessData) {
+    const toTranslate = [];
+    readinessData.forEach((item, storeId) => {
+      if (item.country === 'DE' && item.finalConfirmation && !item.finalConfirmationEn) {
+        toTranslate.push(storeId);
+      }
+    });
+    if (toTranslate.length === 0) return;
+
+    try {
+      const translations = await translateTexts(
+        toTranslate.map((storeId) => readinessData.get(storeId).finalConfirmation),
+        'de'
+      );
+      setReadinessByStoreId((prev) => {
+        const next = new Map(prev);
+        toTranslate.forEach((storeId, i) => {
+          const item = next.get(storeId);
+          if (item) next.set(storeId, { ...item, finalConfirmationEn: translations[i] });
+        });
+        return next;
+      });
+    } catch (err) {
+      console.error('Translation failed, showing original German text:', err);
     }
   }
 
@@ -92,6 +157,7 @@ export default function App() {
       setItems(countryData);
       setReadinessByStoreId(readinessData);
       setLastUpdated(new Date());
+      translateGermanNotes(readinessData);
     } catch (err) {
       console.error(err);
     } finally {
@@ -168,10 +234,11 @@ export default function App() {
   }, []);
 
   // Every item, enriched with its readiness-form match (by site number)
-  // and bucketed into whichever week its Install Date falls in — items
+  // and bucketed into whichever week its Install Date falls in \u2014 items
   // with no date, or a date outside the visible window, are dropped.
   const weeklyData = useMemo(() => {
     if (!items || !readinessByStoreId) return null;
+    const now = new Date();
 
     return weeks.map((week) => {
       const inWeek = items.filter((item) => {
@@ -184,7 +251,12 @@ export default function App() {
       COUNTRY_ORDER.forEach((c) => { byCountry[c] = []; });
       inWeek.forEach((item) => {
         const readiness = readinessByStoreId.get(item.name.trim());
-        byCountry[item.country].push({ ...item, readiness });
+        const enriched = { ...item, readiness };
+        byCountry[item.country].push({
+          ...enriched,
+          outcome: classifyInstallOutcome(enriched.installPhase),
+          atRisk: isAtRisk(enriched, now)
+        });
       });
       Object.values(byCountry).forEach((list) => list.sort((a, b) => a.installDate.localeCompare(b.installDate)));
 
@@ -194,10 +266,23 @@ export default function App() {
 
   // Default to the first week once data has actually loaded.
   useEffect(() => {
-    if (weeklyData && !activeWeekKey) {
-      setActiveWeekKey(weeklyData[0].key);
+    if (weeklyData && !activeTabKey) {
+      setActiveTabKey(weeklyData[0].key);
     }
-  }, [weeklyData, activeWeekKey]);
+  }, [weeklyData, activeTabKey]);
+
+  // Overview stats across every visible week combined \u2014 a single week's
+  // handful of sites isn't a meaningful sample on its own, so the summary
+  // looks at the whole visible horizon instead.
+  const summaryStats = useMemo(() => {
+    if (!weeklyData) return null;
+    const all = weeklyData.flatMap((w) => COUNTRY_ORDER.flatMap((c) => w.byCountry[c]));
+    const counts = { success: 0, issue: 0, pending: 0 };
+    all.forEach((s) => { counts[s.outcome] += 1; });
+    const total = all.length;
+    const pct = (n) => (total > 0 ? Math.round((n / total) * 100) : 0);
+    return { total, counts, pct };
+  }, [weeklyData]);
 
   if (loading) {
     return (
@@ -225,7 +310,8 @@ export default function App() {
     );
   }
 
-  const activeWeek = weeklyData.find((w) => w.key === activeWeekKey) || weeklyData[0];
+  const isSummaryActive = activeTabKey === SUMMARY_TAB_KEY;
+  const activeWeek = !isSummaryActive ? (weeklyData.find((w) => w.key === activeTabKey) || weeklyData[0]) : null;
 
   return (
     <div className="min-h-screen bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
@@ -260,111 +346,185 @@ export default function App() {
       </header>
 
       <main className="px-4 sm:px-6 py-6 space-y-4">
-        <div className="flex flex-wrap gap-2 no-print">
-          {weeklyData.map((week) => (
+        <div className="flex flex-wrap items-center justify-between gap-3 no-print">
+          <div className="flex flex-wrap gap-2">
+            {weeklyData.map((week) => (
+              <button
+                key={week.key}
+                onClick={() => setActiveTabKey(week.key)}
+                className="px-4 py-2.5 rounded-md border text-sm font-medium transition-colors"
+                style={{
+                  borderColor: week.key === activeTabKey ? 'hsl(var(--primary))' : 'hsl(var(--border))',
+                  backgroundColor: week.key === activeTabKey ? 'hsl(var(--primary) / 0.1)' : 'hsl(var(--surface-1))'
+                }}
+              >
+                {week.label}
+                <span className="ml-2 text-xs text-muted-foreground">({week.total})</span>
+              </button>
+            ))}
             <button
-              key={week.key}
-              onClick={() => setActiveWeekKey(week.key)}
-              className="px-4 py-2.5 rounded-md border text-sm font-medium transition-colors"
+              onClick={() => setActiveTabKey(SUMMARY_TAB_KEY)}
+              className="px-4 py-2.5 rounded-md border text-sm font-medium transition-colors inline-flex items-center gap-1.5"
               style={{
-                borderColor: week.key === activeWeek.key ? 'hsl(var(--primary))' : 'hsl(var(--border))',
-                backgroundColor: week.key === activeWeek.key ? 'hsl(var(--primary) / 0.1)' : 'hsl(var(--surface-1))'
+                borderColor: isSummaryActive ? 'hsl(var(--primary))' : 'hsl(var(--border))',
+                backgroundColor: isSummaryActive ? 'hsl(var(--primary) / 0.1)' : 'hsl(var(--surface-1))'
               }}
             >
-              {week.label}
-              <span className="ml-2 text-xs text-muted-foreground">({week.total})</span>
+              <PieChart className="w-3.5 h-3.5" />
+              Summary
             </button>
-          ))}
-        </div>
-
-        <section className="space-y-3">
-          <div className="flex items-baseline gap-3">
-            <h2 className="text-xl font-bold">{activeWeek.label}</h2>
-            <span className="text-sm text-muted-foreground">
-              {formatDate(activeWeek.start)} – {formatDateWithYear(activeWeek.end)} · {activeWeek.total} site{activeWeek.total === 1 ? '' : 's'}
-            </span>
           </div>
 
-          {activeWeek.total === 0 ? (
-            <p className="text-sm text-muted-foreground border border-border rounded-md p-4 bg-[hsl(var(--surface-1))]">No installs scheduled this week.</p>
-          ) : (
-            COUNTRY_ORDER.filter((c) => activeWeek.byCountry[c].length > 0).map((country) => (
-              <div key={country} className="border border-border rounded-md overflow-hidden bg-[hsl(var(--surface-1))]">
-                <div className="px-4 py-2.5 bg-[hsl(var(--surface-2))] border-b border-border flex items-center gap-2">
-                  <span>{FLAGS[country]}</span>
-                  <h3 className="text-sm font-semibold">{country} — {activeWeek.byCountry[country].length} site{activeWeek.byCountry[country].length === 1 ? '' : 's'}</h3>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-[hsl(var(--surface-2))] border-b border-border">
-                      <tr>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Store</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Type</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Install Day</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Kicked Off</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Permit</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">HW Status</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Resource Allocated</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Peds Delivered</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Resource Req</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Bandwidth (Mbps)</th>
-                        <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Readiness Notes</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {activeWeek.byCountry[country].map((site) => (
-                        <tr key={site.id} className="hover:bg-[hsl(var(--surface-2))] transition-colors">
-                          <td className="px-4 py-2.5 text-sm font-medium">{site.name}</td>
-                          <td className="px-4 py-2.5 text-sm text-muted-foreground">{site.type || '\u2014'}</td>
-                          <td className="px-4 py-2.5 text-sm text-muted-foreground">{formatDate(new Date(site.installDate))}</td>
-                          <td className="px-4 py-2.5"><StatusPill value={site.kickOff} /></td>
-                          <td className="px-4 py-2.5"><StatusPill value={site.accessPermits} /></td>
-                          <td className="px-4 py-2.5"><StatusPill value={site.hardwareStatus} /></td>
-                          <td className="px-4 py-2.5"><StatusPill value={deriveResourceAllocated(site.installer)} /></td>
-                          <td className="px-4 py-2.5">
-                            <StatusPill value={
-                              site.readiness
-                                ? (isAffirmative(site.readiness.hasFreedomPayTerminals) ? 'Yes' : 'No')
-                                : null
-                            } />
-                          </td>
-                          <td className="px-4 py-2.5">
-                            <select
-                              className="text-xs bg-transparent border border-border rounded px-1.5 py-1"
-                              value={site.resourceRequested || ''}
-                              onChange={(e) => handleFieldEdit(site, 'resourceRequested', site.resourceRequestedColumnId, e.target.value)}
-                              disabled={savingFields.has(`${site.id}:resourceRequested`)}
-                            >
-                              <option value="">—</option>
-                              <option value="Yes">Yes</option>
-                              <option value="No">No</option>
-                            </select>
-                          </td>
-                          <td className="px-4 py-2.5">
-                            <input
-                              type="text"
-                              className="text-xs bg-transparent border border-border rounded px-1.5 py-1 w-20"
-                              defaultValue={site.bandwidth || ''}
-                              onBlur={(e) => {
-                                if (e.target.value !== (site.bandwidth || '')) {
-                                  handleFieldEdit(site, 'bandwidth', site.bandwidthColumnId, e.target.value);
-                                }
-                              }}
-                              disabled={savingFields.has(`${site.id}:bandwidth`)}
-                            />
-                          </td>
-                          <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-xs">
-                            {site.readiness?.finalConfirmation || (site.readiness ? '\u2014' : 'No readiness form submitted yet')}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ))
+          {!isSummaryActive && (
+            <div className="flex gap-1.5">
+              {['all', ...COUNTRY_ORDER].map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setCountryFilter(c)}
+                  className="px-2.5 py-1.5 rounded-md border text-xs font-medium transition-colors"
+                  style={{
+                    borderColor: countryFilter === c ? 'hsl(var(--primary))' : 'hsl(var(--border))',
+                    backgroundColor: countryFilter === c ? 'hsl(var(--primary) / 0.1)' : 'hsl(var(--surface-1))'
+                  }}
+                >
+                  {c === 'all' ? 'All' : `${FLAGS[c]} ${c}`}
+                </button>
+              ))}
+            </div>
           )}
-        </section>
+        </div>
+
+        {isSummaryActive ? (
+          <section className="space-y-4">
+            <div className="flex items-baseline gap-3">
+              <h2 className="text-xl font-bold">Programme Summary</h2>
+              <span className="text-sm text-muted-foreground">
+                Across all {WEEKS_TO_SHOW} visible weeks · {summaryStats.total} site{summaryStats.total === 1 ? '' : 's'}
+              </span>
+            </div>
+            <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+              {[
+                { label: 'Complete / Live', key: 'success', color: 'hsl(var(--status-complete))' },
+                { label: 'Issue / Revisit', key: 'issue', color: 'hsl(var(--destructive))' },
+                { label: 'Not Installed Yet', key: 'pending', color: 'hsl(var(--status-scheduled))' }
+              ].map((s) => (
+                <div key={s.key} className="border border-border rounded-md p-5 bg-[hsl(var(--surface-1))]" style={{ borderTop: `3px solid ${s.color}` }}>
+                  <div className="text-4xl font-bold tabular-nums" style={{ color: s.color }}>{summaryStats.pct(summaryStats.counts[s.key])}%</div>
+                  <div className="text-sm text-muted-foreground mt-1">{s.label}</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">{summaryStats.counts[s.key]} of {summaryStats.total} sites</div>
+                  <div className="mt-3 h-1.5 rounded-full bg-[hsl(var(--surface-2))] overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${summaryStats.pct(summaryStats.counts[s.key])}%`, backgroundColor: s.color }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : (
+          <section className="space-y-3">
+            <div className="flex items-baseline gap-3">
+              <h2 className="text-xl font-bold">{activeWeek.label}</h2>
+              <span className="text-sm text-muted-foreground">
+                {formatDate(activeWeek.start)} – {formatDateWithYear(activeWeek.end)} · {activeWeek.total} site{activeWeek.total === 1 ? '' : 's'}
+              </span>
+            </div>
+
+            {activeWeek.total === 0 ? (
+              <p className="text-sm text-muted-foreground border border-border rounded-md p-4 bg-[hsl(var(--surface-1))]">No installs scheduled this week.</p>
+            ) : (
+              COUNTRY_ORDER
+                .filter((c) => activeWeek.byCountry[c].length > 0 && (countryFilter === 'all' || countryFilter === c))
+                .map((country) => (
+                  <div key={country} className="border border-border rounded-md overflow-hidden bg-[hsl(var(--surface-1))]" style={{ borderTop: `3px solid ${COUNTRY_ACCENT[country]}` }}>
+                    <div className="px-4 py-3 bg-[hsl(var(--surface-2))] border-b border-border flex items-center gap-2.5">
+                      <span className="text-3xl leading-none">{FLAGS[country]}</span>
+                      <h3 className="text-base font-bold">{country} <span className="font-normal text-muted-foreground text-sm">— {activeWeek.byCountry[country].length} site{activeWeek.byCountry[country].length === 1 ? '' : 's'}</span></h3>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-[hsl(var(--surface-2))] border-b border-border">
+                          <tr>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Store</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Type</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Install Day</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Kicked Off</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Permit</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">HW Status</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Resource Allocated</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Peds Delivered</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Resource Req</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Bandwidth (Mbps)</th>
+                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Readiness Notes</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {activeWeek.byCountry[country].map((site) => (
+                            <tr key={site.id} className="hover:brightness-110 transition-all" style={outcomeRowStyle(site.outcome)}>
+                              <td className="px-4 py-2.5 text-sm font-medium">
+                                <span className="inline-flex items-center gap-1.5">
+                                  {site.atRisk && <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'hsl(var(--status-scheduled))' }} />}
+                                  {site.name}
+                                </span>
+                              </td>
+                              <td className="px-4 py-2.5 text-sm text-muted-foreground">{site.type || '\u2014'}</td>
+                              <td className="px-4 py-2.5 text-sm text-muted-foreground">{formatDate(new Date(site.installDate))}</td>
+                              <td className="px-4 py-2.5"><StatusPill value={site.kickOff} /></td>
+                              <td className="px-4 py-2.5"><StatusPill value={site.accessPermits} /></td>
+                              <td className="px-4 py-2.5"><StatusPill value={site.hardwareStatus} /></td>
+                              <td className="px-4 py-2.5"><StatusPill value={deriveResourceAllocated(site.installer)} /></td>
+                              <td className="px-4 py-2.5">
+                                <StatusPill value={
+                                  site.readiness
+                                    ? (isAffirmative(site.readiness.hasFreedomPayTerminals) ? 'Yes' : 'No')
+                                    : null
+                                } />
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <select
+                                  className="text-xs bg-transparent border border-border rounded px-1.5 py-1"
+                                  value={site.resourceRequested || ''}
+                                  onChange={(e) => handleFieldEdit(site, 'resourceRequested', site.resourceRequestedColumnId, e.target.value)}
+                                  disabled={savingFields.has(`${site.id}:resourceRequested`)}
+                                >
+                                  <option value="">—</option>
+                                  <option value="Yes">Yes</option>
+                                  <option value="No">No</option>
+                                </select>
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <input
+                                  type="text"
+                                  className="text-xs bg-transparent border border-border rounded px-1.5 py-1 w-20"
+                                  defaultValue={site.bandwidth || ''}
+                                  onBlur={(e) => {
+                                    if (e.target.value !== (site.bandwidth || '')) {
+                                      handleFieldEdit(site, 'bandwidth', site.bandwidthColumnId, e.target.value);
+                                    }
+                                  }}
+                                  disabled={savingFields.has(`${site.id}:bandwidth`)}
+                                />
+                              </td>
+                              <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-xs">
+                                {site.readiness ? (
+                                  site.readiness.finalConfirmation ? (
+                                    <span title={site.readiness.finalConfirmationEn ? site.readiness.finalConfirmation : undefined}>
+                                      {site.readiness.finalConfirmationEn || site.readiness.finalConfirmation}
+                                      {site.readiness.finalConfirmationEn && (
+                                        <span className="text-[10px] text-muted-foreground/70 italic ml-1">(translated)</span>
+                                      )}
+                                    </span>
+                                  ) : '\u2014'
+                                ) : 'No readiness form submitted yet'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))
+            )}
+          </section>
+        )}
       </main>
     </div>
   );
