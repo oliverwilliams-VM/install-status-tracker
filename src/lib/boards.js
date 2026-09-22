@@ -5,9 +5,9 @@
 //
 // Two fields are NOT tracked on every board:
 // - accessPermits: missing on IE entirely (only a read-only mirror exists)
-// - installer: only exists as a real status column on UK and DE; IE/NL/FI
+// - installer: exists as a real status column on UK, NL and DE; IE and FI
 //   have no native "who's doing this install" field, so Resource Allocated
-//   can't be derived for those three countries yet.
+//   can't be derived for those two countries yet.
 export const COUNTRY_BOARDS = [
   {
     id: '5678172488',
@@ -53,7 +53,7 @@ export const COUNTRY_BOARDS = [
       kickOff: 'status10__1',
       accessPermits: 'access_permits',
       hardwareStatus: 'color2',
-      installer: null,
+      installer: 'color_mm7e4z0m',
       siteStatus: 'status1__1',
       resourceRequested: 'color_mm7emrab',
       bandwidth: 'text_mm7ezcw7',
