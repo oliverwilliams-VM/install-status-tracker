@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { RefreshCw, AlertCircle, AlertTriangle, Maximize2, Minimize2, Download, PieChart } from 'lucide-react';
+import { RefreshCw, AlertCircle, AlertTriangle, CheckCircle2, XCircle, Maximize2, Minimize2, Download, ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react';
 import { fetchCountryItems, fetchReadinessItems, updateCountryItemField } from './lib/mondayClient';
 import { translateTexts } from './lib/translate';
 import { COUNTRY_BOARDS, READINESS_BOARDS, isAffirmative, classifyInstallOutcome } from './lib/boards';
@@ -9,8 +9,10 @@ const FLAGS = { UK: '\u{1F1EC}\u{1F1E7}', IE: '\u{1F1EE}\u{1F1EA}', NL: '\u{1F1F
 const COUNTRY_ORDER = COUNTRY_BOARDS.map((b) => b.country);
 const COUNTRY_ACCENT = { UK: 'hsl(var(--chart-1))', IE: 'hsl(var(--chart-2))', NL: 'hsl(var(--chart-3))', DE: 'hsl(var(--chart-4))', FI: 'hsl(var(--chart-5))' };
 const COUNTRIES_WITH_READINESS_BOARD = new Set(READINESS_BOARDS.map((b) => b.country));
-const WEEKS_TO_SHOW = 4;
-const SUMMARY_TAB_KEY = '__summary__';
+// Quick-access offsets from "this week" (0). Anything beyond these is
+// still reachable via the Prev/Next arrows or the date-jump picker \u2014
+// this is just what gets its own always-visible button.
+const QUICK_OFFSETS = [0, 1, 2, 3];
 
 // Monday of the week containing `date`.
 function mondayOf(date) {
@@ -28,6 +30,14 @@ function formatDate(d) {
 
 function formatDateWithYear(d) {
   return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function weekLabelForOffset(offset, start) {
+  if (offset === 0) return 'This Week';
+  if (offset === 1) return 'Next Week';
+  if (offset > 1) return `WC ${formatDate(start)}`;
+  if (offset === -1) return 'Last Week';
+  return `WC ${formatDate(start)}`;
 }
 
 // Whether an install has genuinely been assigned a confirmed installer,
@@ -50,9 +60,8 @@ function deriveResourceAllocated(installerValue) {
 // before-the-fact warning) and its Install Day is imminent (today,
 // tomorrow, or the day after) \u2014 flagging something 3 weeks out as "at
 // risk" the same way as something happening tomorrow would just be
-// noise. Three independent triggers, any one of which is enough:
-// Kick Off still reads as not-yet-sent, Resource Requested was never
-// set, or (for the 3 countries with a readiness form board) no
+// noise. Either trigger is enough on its own: Kick Off still reads as
+// not-yet-sent, or (for the 3 countries with a readiness form board) no
 // franchisee submission exists at all yet.
 function isAtRisk(site, now) {
   if (!site.installDate) return false;
@@ -62,14 +71,13 @@ function isAtRisk(site, now) {
   if (daysUntil < 0 || daysUntil > 2) return false;
 
   const kickOffNotReady = /not|waiting/i.test(site.kickOff || '');
-  const resourceMissing = !site.resourceRequested;
   const noReadinessForm = COUNTRIES_WITH_READINESS_BOARD.has(site.country) && !site.readiness;
-  return kickOffNotReady || resourceMissing || noReadinessForm;
+  return kickOffNotReady || noReadinessForm;
 }
 
 function outcomeRowStyle(outcome) {
-  if (outcome === 'success') return { backgroundColor: 'hsl(var(--status-complete) / 0.12)' };
-  if (outcome === 'issue') return { backgroundColor: 'hsl(var(--destructive) / 0.12)' };
+  if (outcome === 'success') return { backgroundColor: 'hsl(var(--status-complete) / 0.14)' };
+  if (outcome === 'issue') return { backgroundColor: 'hsl(var(--destructive) / 0.14)' };
   return undefined;
 }
 
@@ -99,7 +107,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [activeTabKey, setActiveTabKey] = useState(null);
+  const [weekOffset, setWeekOffset] = useState(0); // 0 = this week; negative = past, positive = future
   const [countryFilter, setCountryFilter] = useState('all');
 
   async function load() {
@@ -217,72 +225,78 @@ export default function App() {
     return () => document.removeEventListener('fullscreenchange', handleChange);
   }, []);
 
-  const weeks = useMemo(() => {
+  // The currently viewed week, purely derived from weekOffset \u2014 this can
+  // point at any week at all, past or future, not just a fixed forward
+  // window. Data for past weeks is already being fetched (Monday doesn't
+  // delete a site just because its Install Date has passed), so viewing
+  // history needs no extra fetching, just a wider view window.
+  const viewedWeek = useMemo(() => {
     const thisMonday = mondayOf(new Date());
-    return Array.from({ length: WEEKS_TO_SHOW }, (_, i) => {
-      const start = new Date(thisMonday);
-      start.setDate(start.getDate() + i * 7);
-      const end = new Date(start);
-      end.setDate(end.getDate() + 6);
-      return {
-        key: start.toISOString().slice(0, 10),
-        start,
-        end,
-        label: i === 0 ? 'This Week' : i === 1 ? 'Next Week' : `WC ${formatDate(start)}`
-      };
-    });
-  }, []);
+    const start = new Date(thisMonday);
+    start.setDate(start.getDate() + weekOffset * 7);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    return { start, end, key: start.toISOString().slice(0, 10), label: weekLabelForOffset(weekOffset, start) };
+  }, [weekOffset]);
 
-  // Every item, enriched with its readiness-form match (by site number)
-  // and bucketed into whichever week its Install Date falls in \u2014 items
-  // with no date, or a date outside the visible window, are dropped.
-  const weeklyData = useMemo(() => {
+  // Every item in the viewed week, enriched with its readiness-form
+  // match (by site number) and its outcome/at-risk classification.
+  const weekData = useMemo(() => {
     if (!items || !readinessByStoreId) return null;
     const now = new Date();
 
-    return weeks.map((week) => {
-      const inWeek = items.filter((item) => {
-        if (!item.installDate) return false;
-        const d = new Date(item.installDate);
-        return d >= week.start && d <= new Date(week.end.getTime() + 24 * 60 * 60 * 1000 - 1);
-      });
-
-      const byCountry = {};
-      COUNTRY_ORDER.forEach((c) => { byCountry[c] = []; });
-      inWeek.forEach((item) => {
-        const readiness = readinessByStoreId.get(item.name.trim());
-        const enriched = { ...item, readiness };
-        byCountry[item.country].push({
-          ...enriched,
-          outcome: classifyInstallOutcome(enriched.installPhase),
-          atRisk: isAtRisk(enriched, now)
-        });
-      });
-      Object.values(byCountry).forEach((list) => list.sort((a, b) => a.installDate.localeCompare(b.installDate)));
-
-      return { ...week, byCountry, total: inWeek.length };
+    const inWeek = items.filter((item) => {
+      if (!item.installDate) return false;
+      const d = new Date(item.installDate);
+      return d >= viewedWeek.start && d <= new Date(viewedWeek.end.getTime() + 24 * 60 * 60 * 1000 - 1);
     });
-  }, [items, readinessByStoreId, weeks]);
 
-  // Default to the first week once data has actually loaded.
-  useEffect(() => {
-    if (weeklyData && !activeTabKey) {
-      setActiveTabKey(weeklyData[0].key);
-    }
-  }, [weeklyData, activeTabKey]);
+    const byCountry = {};
+    COUNTRY_ORDER.forEach((c) => { byCountry[c] = []; });
+    inWeek.forEach((item) => {
+      const readiness = readinessByStoreId.get(item.name.trim());
+      const enriched = { ...item, readiness };
+      byCountry[item.country].push({
+        ...enriched,
+        outcome: classifyInstallOutcome(enriched.installPhase),
+        atRisk: isAtRisk(enriched, now)
+      });
+    });
+    Object.values(byCountry).forEach((list) => list.sort((a, b) => a.installDate.localeCompare(b.installDate)));
 
-  // Overview stats across every visible week combined \u2014 a single week's
-  // handful of sites isn't a meaningful sample on its own, so the summary
-  // looks at the whole visible horizon instead.
-  const summaryStats = useMemo(() => {
-    if (!weeklyData) return null;
-    const all = weeklyData.flatMap((w) => COUNTRY_ORDER.flatMap((c) => w.byCountry[c]));
+    return { ...viewedWeek, byCountry, total: inWeek.length };
+  }, [items, readinessByStoreId, viewedWeek]);
+
+  // Hero summary stats, scoped to ONLY the currently viewed week \u2014 not
+  // an aggregate across multiple weeks.
+  const weekSummary = useMemo(() => {
+    if (!weekData) return null;
+    const all = COUNTRY_ORDER.flatMap((c) => weekData.byCountry[c]);
     const counts = { success: 0, issue: 0, pending: 0 };
     all.forEach((s) => { counts[s.outcome] += 1; });
     const total = all.length;
     const pct = (n) => (total > 0 ? Math.round((n / total) * 100) : 0);
     return { total, counts, pct };
-  }, [weeklyData]);
+  }, [weekData]);
+
+  // Precomputed label + start date for each quick-access button, so the
+  // render itself doesn't need to juggle Date mutation inline.
+  const quickWeeks = useMemo(() => {
+    const thisMonday = mondayOf(new Date());
+    return QUICK_OFFSETS.map((offset) => {
+      const start = new Date(thisMonday);
+      start.setDate(start.getDate() + offset * 7);
+      return { offset, start, label: weekLabelForOffset(offset, start) };
+    });
+  }, []);
+
+  function jumpToDate(dateStr) {
+    if (!dateStr) return;
+    const picked = mondayOf(new Date(dateStr));
+    const thisMonday = mondayOf(new Date());
+    const offset = Math.round((picked - thisMonday) / (7 * 24 * 60 * 60 * 1000));
+    setWeekOffset(offset);
+  }
 
   if (loading) {
     return (
@@ -309,9 +323,6 @@ export default function App() {
       </div>
     );
   }
-
-  const isSummaryActive = activeTabKey === SUMMARY_TAB_KEY;
-  const activeWeek = !isSummaryActive ? (weeklyData.find((w) => w.key === activeTabKey) || weeklyData[0]) : null;
 
   return (
     <div className="min-h-screen bg-[hsl(var(--background))] text-[hsl(var(--foreground))]">
@@ -347,184 +358,168 @@ export default function App() {
 
       <main className="px-4 sm:px-6 py-6 space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3 no-print">
-          <div className="flex flex-wrap gap-2">
-            {weeklyData.map((week) => (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" className="h-9 w-9 p-0" onClick={() => setWeekOffset((o) => o - 1)} title="Previous week">
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            {quickWeeks.map(({ offset, label }) => (
               <button
-                key={week.key}
-                onClick={() => setActiveTabKey(week.key)}
+                key={offset}
+                onClick={() => setWeekOffset(offset)}
                 className="px-4 py-2.5 rounded-md border text-sm font-medium transition-colors"
                 style={{
-                  borderColor: week.key === activeTabKey ? 'hsl(var(--primary))' : 'hsl(var(--border))',
-                  backgroundColor: week.key === activeTabKey ? 'hsl(var(--primary) / 0.1)' : 'hsl(var(--surface-1))'
+                  borderColor: offset === weekOffset ? 'hsl(var(--primary))' : 'hsl(var(--border))',
+                  backgroundColor: offset === weekOffset ? 'hsl(var(--primary) / 0.1)' : 'hsl(var(--surface-1))'
                 }}
               >
-                {week.label}
-                <span className="ml-2 text-xs text-muted-foreground">({week.total})</span>
+                {label}
               </button>
             ))}
-            <button
-              onClick={() => setActiveTabKey(SUMMARY_TAB_KEY)}
-              className="px-4 py-2.5 rounded-md border text-sm font-medium transition-colors inline-flex items-center gap-1.5"
-              style={{
-                borderColor: isSummaryActive ? 'hsl(var(--primary))' : 'hsl(var(--border))',
-                backgroundColor: isSummaryActive ? 'hsl(var(--primary) / 0.1)' : 'hsl(var(--surface-1))'
-              }}
-            >
-              <PieChart className="w-3.5 h-3.5" />
-              Summary
-            </button>
+            <Button variant="outline" size="sm" className="h-9 w-9 p-0" onClick={() => setWeekOffset((o) => o + 1)} title="Next week">
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+            <label className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-border bg-[hsl(var(--surface-1))] text-xs text-muted-foreground cursor-pointer">
+              <CalendarDays className="w-3.5 h-3.5" />
+              Jump to
+              <input
+                type="date"
+                className="bg-transparent text-xs outline-none"
+                onChange={(e) => jumpToDate(e.target.value)}
+              />
+            </label>
           </div>
 
-          {!isSummaryActive && (
-            <div className="flex gap-1.5">
-              {['all', ...COUNTRY_ORDER].map((c) => (
-                <button
-                  key={c}
-                  onClick={() => setCountryFilter(c)}
-                  className="px-2.5 py-1.5 rounded-md border text-xs font-medium transition-colors"
-                  style={{
-                    borderColor: countryFilter === c ? 'hsl(var(--primary))' : 'hsl(var(--border))',
-                    backgroundColor: countryFilter === c ? 'hsl(var(--primary) / 0.1)' : 'hsl(var(--surface-1))'
-                  }}
-                >
-                  {c === 'all' ? 'All' : `${FLAGS[c]} ${c}`}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="flex gap-1.5">
+            {['all', ...COUNTRY_ORDER].map((c) => (
+              <button
+                key={c}
+                onClick={() => setCountryFilter(c)}
+                className="px-2.5 py-1.5 rounded-md border text-xs font-medium transition-colors"
+                style={{
+                  borderColor: countryFilter === c ? 'hsl(var(--primary))' : 'hsl(var(--border))',
+                  backgroundColor: countryFilter === c ? 'hsl(var(--primary) / 0.1)' : 'hsl(var(--surface-1))'
+                }}
+              >
+                {c === 'all' ? 'All' : `${FLAGS[c]} ${c}`}
+              </button>
+            ))}
+          </div>
         </div>
 
-        {isSummaryActive ? (
-          <section className="space-y-4">
-            <div className="flex items-baseline gap-3">
-              <h2 className="text-xl font-bold">Programme Summary</h2>
-              <span className="text-sm text-muted-foreground">
-                Across all {WEEKS_TO_SHOW} visible weeks · {summaryStats.total} site{summaryStats.total === 1 ? '' : 's'}
-              </span>
-            </div>
-            <div className="grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+        <section className="space-y-4">
+          <div className="flex items-baseline gap-3">
+            <h2 className="text-xl font-bold">{weekData.label}</h2>
+            <span className="text-sm text-muted-foreground">
+              {formatDate(weekData.start)} – {formatDateWithYear(weekData.end)} · {weekData.total} site{weekData.total === 1 ? '' : 's'}
+            </span>
+            {weekOffset < 0 && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-[hsl(var(--surface-2))] text-muted-foreground">Viewing history</span>
+            )}
+          </div>
+
+          {weekData.total > 0 && (
+            <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
               {[
                 { label: 'Complete / Live', key: 'success', color: 'hsl(var(--status-complete))' },
                 { label: 'Issue / Revisit', key: 'issue', color: 'hsl(var(--destructive))' },
                 { label: 'Not Installed Yet', key: 'pending', color: 'hsl(var(--status-scheduled))' }
               ].map((s) => (
-                <div key={s.key} className="border border-border rounded-md p-5 bg-[hsl(var(--surface-1))]" style={{ borderTop: `3px solid ${s.color}` }}>
-                  <div className="text-4xl font-bold tabular-nums" style={{ color: s.color }}>{summaryStats.pct(summaryStats.counts[s.key])}%</div>
-                  <div className="text-sm text-muted-foreground mt-1">{s.label}</div>
-                  <div className="text-xs text-muted-foreground mt-0.5">{summaryStats.counts[s.key]} of {summaryStats.total} sites</div>
-                  <div className="mt-3 h-1.5 rounded-full bg-[hsl(var(--surface-2))] overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width: `${summaryStats.pct(summaryStats.counts[s.key])}%`, backgroundColor: s.color }} />
+                <div key={s.key} className="border border-border rounded-md p-4 bg-[hsl(var(--surface-1))]" style={{ borderTop: `3px solid ${s.color}` }}>
+                  <div className="text-3xl font-bold tabular-nums" style={{ color: s.color }}>{weekSummary.pct(weekSummary.counts[s.key])}%</div>
+                  <div className="text-xs text-muted-foreground mt-0.5">{s.label} · {weekSummary.counts[s.key]} of {weekSummary.total}</div>
+                  <div className="mt-2 h-1.5 rounded-full bg-[hsl(var(--surface-2))] overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${weekSummary.pct(weekSummary.counts[s.key])}%`, backgroundColor: s.color }} />
                   </div>
                 </div>
               ))}
             </div>
-          </section>
-        ) : (
-          <section className="space-y-3">
-            <div className="flex items-baseline gap-3">
-              <h2 className="text-xl font-bold">{activeWeek.label}</h2>
-              <span className="text-sm text-muted-foreground">
-                {formatDate(activeWeek.start)} – {formatDateWithYear(activeWeek.end)} · {activeWeek.total} site{activeWeek.total === 1 ? '' : 's'}
-              </span>
-            </div>
+          )}
 
-            {activeWeek.total === 0 ? (
-              <p className="text-sm text-muted-foreground border border-border rounded-md p-4 bg-[hsl(var(--surface-1))]">No installs scheduled this week.</p>
-            ) : (
-              COUNTRY_ORDER
-                .filter((c) => activeWeek.byCountry[c].length > 0 && (countryFilter === 'all' || countryFilter === c))
-                .map((country) => (
-                  <div key={country} className="border border-border rounded-md overflow-hidden bg-[hsl(var(--surface-1))]" style={{ borderTop: `3px solid ${COUNTRY_ACCENT[country]}` }}>
-                    <div className="px-4 py-3 bg-[hsl(var(--surface-2))] border-b border-border flex items-center gap-2.5">
-                      <span className="text-3xl leading-none">{FLAGS[country]}</span>
-                      <h3 className="text-base font-bold">{country} <span className="font-normal text-muted-foreground text-sm">— {activeWeek.byCountry[country].length} site{activeWeek.byCountry[country].length === 1 ? '' : 's'}</span></h3>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead className="bg-[hsl(var(--surface-2))] border-b border-border">
-                          <tr>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Store</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Type</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Install Day</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Kicked Off</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Permit</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">HW Status</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Resource Allocated</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Peds Delivered</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Resource Req</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Bandwidth (Mbps)</th>
-                            <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Readiness Notes</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                          {activeWeek.byCountry[country].map((site) => (
-                            <tr key={site.id} className="hover:brightness-110 transition-all" style={outcomeRowStyle(site.outcome)}>
-                              <td className="px-4 py-2.5 text-sm font-medium">
-                                <span className="inline-flex items-center gap-1.5">
-                                  {site.atRisk && <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'hsl(var(--status-scheduled))' }} />}
-                                  {site.name}
-                                </span>
-                              </td>
-                              <td className="px-4 py-2.5 text-sm text-muted-foreground">{site.type || '\u2014'}</td>
-                              <td className="px-4 py-2.5 text-sm text-muted-foreground">{formatDate(new Date(site.installDate))}</td>
-                              <td className="px-4 py-2.5"><StatusPill value={site.kickOff} /></td>
-                              <td className="px-4 py-2.5"><StatusPill value={site.accessPermits} /></td>
-                              <td className="px-4 py-2.5"><StatusPill value={site.hardwareStatus} /></td>
-                              <td className="px-4 py-2.5"><StatusPill value={deriveResourceAllocated(site.installer)} /></td>
-                              <td className="px-4 py-2.5">
-                                <StatusPill value={
-                                  site.readiness
-                                    ? (isAffirmative(site.readiness.hasFreedomPayTerminals) ? 'Yes' : 'No')
-                                    : null
-                                } />
-                              </td>
-                              <td className="px-4 py-2.5">
-                                <select
-                                  className="text-xs bg-transparent border border-border rounded px-1.5 py-1"
-                                  value={site.resourceRequested || ''}
-                                  onChange={(e) => handleFieldEdit(site, 'resourceRequested', site.resourceRequestedColumnId, e.target.value)}
-                                  disabled={savingFields.has(`${site.id}:resourceRequested`)}
-                                >
-                                  <option value="">—</option>
-                                  <option value="Yes">Yes</option>
-                                  <option value="No">No</option>
-                                </select>
-                              </td>
-                              <td className="px-4 py-2.5">
-                                <input
-                                  type="text"
-                                  className="text-xs bg-transparent border border-border rounded px-1.5 py-1 w-20"
-                                  defaultValue={site.bandwidth || ''}
-                                  onBlur={(e) => {
-                                    if (e.target.value !== (site.bandwidth || '')) {
-                                      handleFieldEdit(site, 'bandwidth', site.bandwidthColumnId, e.target.value);
-                                    }
-                                  }}
-                                  disabled={savingFields.has(`${site.id}:bandwidth`)}
-                                />
-                              </td>
-                              <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-xs">
-                                {site.readiness ? (
-                                  site.readiness.finalConfirmation ? (
-                                    <span title={site.readiness.finalConfirmationEn ? site.readiness.finalConfirmation : undefined}>
-                                      {site.readiness.finalConfirmationEn || site.readiness.finalConfirmation}
-                                      {site.readiness.finalConfirmationEn && (
-                                        <span className="text-[10px] text-muted-foreground/70 italic ml-1">(translated)</span>
-                                      )}
-                                    </span>
-                                  ) : '\u2014'
-                                ) : 'No readiness form submitted yet'}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+          {weekData.total === 0 ? (
+            <p className="text-sm text-muted-foreground border border-border rounded-md p-4 bg-[hsl(var(--surface-1))]">No installs scheduled this week.</p>
+          ) : (
+            COUNTRY_ORDER
+              .filter((c) => weekData.byCountry[c].length > 0 && (countryFilter === 'all' || countryFilter === c))
+              .map((country) => (
+                <div key={country} className="border border-border rounded-md overflow-hidden bg-[hsl(var(--surface-1))]" style={{ borderTop: `3px solid ${COUNTRY_ACCENT[country]}` }}>
+                  <div className="px-4 py-3 bg-[hsl(var(--surface-2))] border-b border-border flex items-center gap-2.5">
+                    <span className="text-3xl leading-none">{FLAGS[country]}</span>
+                    <h3 className="text-base font-bold">{country} <span className="font-normal text-muted-foreground text-sm">— {weekData.byCountry[country].length} site{weekData.byCountry[country].length === 1 ? '' : 's'}</span></h3>
                   </div>
-                ))
-            )}
-          </section>
-        )}
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-[hsl(var(--surface-2))] border-b border-border">
+                        <tr>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Store</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Type</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Install Day</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Kicked Off</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">HW Status</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Resource Allocated</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Peds Delivered</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Bandwidth (Mbps)</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Readiness Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {weekData.byCountry[country].map((site) => (
+                          <tr key={site.id} className="hover:brightness-110 transition-all" style={outcomeRowStyle(site.outcome)}>
+                            <td className="px-4 py-2.5 text-sm font-medium">
+                              <span className="inline-flex items-center gap-1.5">
+                                {site.outcome === 'success' && <CheckCircle2 className="w-4 h-4 flex-shrink-0" style={{ color: 'hsl(var(--status-complete))' }} />}
+                                {site.outcome === 'issue' && <XCircle className="w-4 h-4 flex-shrink-0" style={{ color: 'hsl(var(--destructive))' }} />}
+                                {site.atRisk && <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'hsl(var(--status-scheduled))' }} />}
+                                {site.name}
+                              </span>
+                              {site.outcome === 'success' && <div className="text-[10px] font-semibold uppercase tracking-wide mt-0.5" style={{ color: 'hsl(var(--status-complete))' }}>Complete</div>}
+                              {site.outcome === 'issue' && <div className="text-[10px] font-semibold uppercase tracking-wide mt-0.5" style={{ color: 'hsl(var(--destructive))' }}>Issue</div>}
+                            </td>
+                            <td className="px-4 py-2.5 text-sm text-muted-foreground">{site.type || '\u2014'}</td>
+                            <td className="px-4 py-2.5 text-sm text-muted-foreground">{formatDate(new Date(site.installDate))}</td>
+                            <td className="px-4 py-2.5"><StatusPill value={site.kickOff} /></td>
+                            <td className="px-4 py-2.5"><StatusPill value={site.hardwareStatus} /></td>
+                            <td className="px-4 py-2.5"><StatusPill value={deriveResourceAllocated(site.installer)} /></td>
+                            <td className="px-4 py-2.5">
+                              <StatusPill value={
+                                site.readiness
+                                  ? (isAffirmative(site.readiness.hasFreedomPayTerminals) ? 'Yes' : 'No')
+                                  : null
+                              } />
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <input
+                                type="text"
+                                className="text-xs bg-transparent border border-border rounded px-1.5 py-1 w-20"
+                                defaultValue={site.bandwidth || ''}
+                                onBlur={(e) => {
+                                  if (e.target.value !== (site.bandwidth || '')) {
+                                    handleFieldEdit(site, 'bandwidth', site.bandwidthColumnId, e.target.value);
+                                  }
+                                }}
+                                disabled={savingFields.has(`${site.id}:bandwidth`)}
+                              />
+                            </td>
+                            <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-xs">
+                              {site.readiness ? (
+                                site.readiness.finalConfirmation ? (
+                                  <span title={site.readiness.finalConfirmationEn ? site.readiness.finalConfirmation : undefined}>
+                                    {site.readiness.finalConfirmationEn || site.readiness.finalConfirmation}
+                                    {site.readiness.finalConfirmationEn && (
+                                      <span className="text-[10px] text-muted-foreground/70 italic ml-1">(translated)</span>
+                                    )}
+                                  </span>
+                                ) : '\u2014'
+                              ) : 'No readiness form submitted yet'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ))
+          )}
+        </section>
       </main>
     </div>
   );
