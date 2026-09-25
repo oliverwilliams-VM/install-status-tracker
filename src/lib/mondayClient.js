@@ -38,7 +38,8 @@ function shapeCountryItem(rawItem, board) {
     hardwareStatus: get('hardwareStatus'),
     installer: get('installer'),
     siteStatus: get('siteStatus'),
-    resourceRequested: get('resourceRequested')
+    resourceRequested: get('resourceRequested'),
+    revisitCause: get('revisitCause')
   };
 }
 

@@ -23,6 +23,7 @@ export const COUNTRY_BOARDS = [
       siteStatus: 'status9',
       resourceRequested: 'color_mm7eh5sy',
       bandwidth: 'text_mm7er48z',
+      revisitCause: null,
       linkToSignUp: 'board_relation1__1'
     }
   },
@@ -40,6 +41,7 @@ export const COUNTRY_BOARDS = [
       siteStatus: 'status9__1',
       resourceRequested: 'color_mm7e2q4t',
       bandwidth: 'text_mm7er93n',
+      revisitCause: null,
       linkToSignUp: 'board_relation_mkmq1n7'
     }
   },
@@ -57,6 +59,7 @@ export const COUNTRY_BOARDS = [
       siteStatus: 'status1__1',
       resourceRequested: 'color_mm7emrab',
       bandwidth: 'text_mm7ezcw7',
+      revisitCause: null,
       linkToSignUp: 'board_relation6__1'
     }
   },
@@ -74,6 +77,10 @@ export const COUNTRY_BOARDS = [
       siteStatus: 'status__1',
       resourceRequested: 'color_mm7ewq9y',
       bandwidth: 'text_mm7ebeyq',
+      // Only DE has this as a real column on the item itself — UK/NL/FI
+      // only link out to a separate "Site Revisit/Replacement tickets"
+      // board, and IE has no revisit-cause tracking at all yet.
+      revisitCause: 'color_mm7hat00',
       linkToSignUp: 'board_relation1__1'
     }
   },
@@ -91,6 +98,7 @@ export const COUNTRY_BOARDS = [
       siteStatus: 'status__1',
       resourceRequested: 'color_mm7e224p',
       bandwidth: 'text_mm7et2mf',
+      revisitCause: null,
       linkToSignUp: 'board_relation5__1'
     }
   }

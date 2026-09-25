@@ -274,7 +274,11 @@ export default function App() {
   }, [items, readinessByStoreId, viewedWeek]);
 
   // Hero summary stats, scoped to ONLY the currently viewed week \u2014 not
-  // an aggregate across multiple weeks.
+  // an aggregate across multiple weeks. Issue/Revisit sites are broken out
+  // by name so the KPI card can show exactly which sites and why, not just
+  // a bare percentage \u2014 revisitCause is only ever populated for DE today
+  // (the only board with a real "Revisit Cause" column on the item itself),
+  // so this falls back to the site's own Install Phase label everywhere else.
   const weekSummary = useMemo(() => {
     if (!weekData) return null;
     const all = COUNTRY_ORDER.flatMap((c) => weekData.byCountry[c]);
@@ -282,7 +286,10 @@ export default function App() {
     all.forEach((s) => { counts[s.outcome] += 1; });
     const total = all.length;
     const pct = (n) => (total > 0 ? Math.round((n / total) * 100) : 0);
-    return { total, counts, pct };
+    const issueSites = all
+      .filter((s) => s.outcome === 'issue')
+      .map((s) => ({ id: s.id, name: s.name, country: s.country, cause: s.revisitCause || s.installPhase || 'Unspecified' }));
+    return { total, counts, pct, issueSites };
   }, [weekData]);
 
   // Precomputed label + start date for each quick-access button, so the
@@ -436,6 +443,17 @@ export default function App() {
                   <div className="mt-2 h-1.5 rounded-full bg-[hsl(var(--surface-2))] overflow-hidden">
                     <div className="h-full rounded-full" style={{ width: `${weekSummary.pct(weekSummary.counts[s.key])}%`, backgroundColor: s.color }} />
                   </div>
+                  {s.key === 'issue' && weekSummary.issueSites.length > 0 && (
+                    <ul className="mt-3 pt-3 border-t border-border space-y-1.5">
+                      {weekSummary.issueSites.map((site) => (
+                        <li key={site.id} className="flex items-start gap-1.5 text-xs">
+                          <span className="flex-shrink-0">{FLAGS[site.country]}</span>
+                          <span className="font-medium flex-shrink-0">{site.name}</span>
+                          <span className="text-muted-foreground truncate">— {site.cause}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               ))}
             </div>
