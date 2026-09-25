@@ -74,11 +74,23 @@ function isAtRisk(site) {
   return kickOffNotReady || noReadinessForm;
 }
 
-// "Ordered with Apex" is a specific supplier variant of the same "Ordered"
-// state on the Hardware Status column — shown simply as "Ordered" here
-// since the burndown call only cares that it's on order, not who from.
+// Every country phrases "hardware is on order" differently on its own
+// Hardware Status column — verified against a real columns-helper dump
+// across all 5 boards rather than guessed. All of these mean exactly the
+// same thing and are shown simply as "Ordered" here, since the burndown
+// call only cares that it's on order, not who from or how it's worded.
+// Deliberately NOT included: "Order required" (IE/DE) — that means the
+// opposite, not yet ordered — and "Shipped via Apex" (UK), which is a
+// genuinely later state than merely on order.
+const ORDERED_VARIANTS = new Set([
+  'ordered',                    // UK / IE / NL / DE, already reads fine as-is
+  'ordered with apex',          // IE / NL
+  'order placed with apex',     // UK
+  'ordered through apex',       // DE
+  'hardware ordered'            // FI
+]);
 function displayHardwareStatus(value) {
-  if ((value || '').trim().toLowerCase() === 'ordered with apex') return 'Ordered';
+  if (ORDERED_VARIANTS.has((value || '').trim().toLowerCase())) return 'Ordered';
   return value;
 }
 
