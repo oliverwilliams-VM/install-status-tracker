@@ -74,6 +74,14 @@ function isAtRisk(site) {
   return kickOffNotReady || noReadinessForm;
 }
 
+// "Ordered with Apex" is a specific supplier variant of the same "Ordered"
+// state on the Hardware Status column — shown simply as "Ordered" here
+// since the burndown call only cares that it's on order, not who from.
+function displayHardwareStatus(value) {
+  if ((value || '').trim().toLowerCase() === 'ordered with apex') return 'Ordered';
+  return value;
+}
+
 function outcomeRowStyle(outcome) {
   if (outcome === 'success') return { backgroundColor: 'hsl(var(--status-complete) / 0.14)' };
   if (outcome === 'issue') return { backgroundColor: 'hsl(var(--destructive) / 0.14)' };
@@ -455,7 +463,6 @@ export default function App() {
                           <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">HW Status</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Resource Allocated</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Peds Delivered</th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Bandwidth (Mbps)</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Readiness Notes</th>
                         </tr>
                       </thead>
@@ -475,7 +482,7 @@ export default function App() {
                             <td className="px-4 py-2.5 text-sm text-muted-foreground">{site.type || '\u2014'}</td>
                             <td className="px-4 py-2.5 text-sm text-muted-foreground">{formatDate(new Date(site.installDate))}</td>
                             <td className="px-4 py-2.5"><StatusPill value={site.kickOff} /></td>
-                            <td className="px-4 py-2.5"><StatusPill value={site.hardwareStatus} /></td>
+                            <td className="px-4 py-2.5"><StatusPill value={displayHardwareStatus(site.hardwareStatus)} /></td>
                             <td className="px-4 py-2.5"><StatusPill value={deriveResourceAllocated(site.installer)} /></td>
                             <td className="px-4 py-2.5">
                               <StatusPill value={
@@ -483,19 +490,6 @@ export default function App() {
                                   ? (isAffirmative(site.readiness.hasFreedomPayTerminals) ? 'Yes' : 'No')
                                   : null
                               } />
-                            </td>
-                            <td className="px-4 py-2.5">
-                              <input
-                                type="text"
-                                className="text-xs bg-transparent border border-border rounded px-1.5 py-1 w-20"
-                                defaultValue={site.bandwidth || ''}
-                                onBlur={(e) => {
-                                  if (e.target.value !== (site.bandwidth || '')) {
-                                    handleFieldEdit(site, 'bandwidth', site.bandwidthColumnId, e.target.value);
-                                  }
-                                }}
-                                disabled={savingFields.has(`${site.id}:bandwidth`)}
-                              />
                             </td>
                             <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-xs">
                               {site.readiness ? (

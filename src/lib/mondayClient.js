@@ -27,7 +27,6 @@ function shapeCountryItem(rawItem, board) {
     id: rawItem.id,
     boardId: board.id,
     resourceRequestedColumnId: board.columns.resourceRequested,
-    bandwidthColumnId: board.columns.bandwidth,
     name: rawItem.name,
     country: board.country,
     group: rawItem.group?.title ?? null,
@@ -39,8 +38,7 @@ function shapeCountryItem(rawItem, board) {
     hardwareStatus: get('hardwareStatus'),
     installer: get('installer'),
     siteStatus: get('siteStatus'),
-    resourceRequested: get('resourceRequested'),
-    bandwidth: get('bandwidth')
+    resourceRequested: get('resourceRequested')
   };
 }
 
@@ -99,9 +97,9 @@ export async function fetchReadinessItems() {
   return itemsByStoreId;
 }
 
-// Writes a single field back to its country board \u2014 used for the two
-// fields that only exist in this tool now (Resource Requested, Bandwidth),
-// since Monday itself is still the single source of truth for them.
+// Writes a single field back to its country board \u2014 used for the one
+// field that's only editable from this tool now (Resource Requested),
+// since Monday itself is still the single source of truth for it.
 export async function updateCountryItemField(boardId, itemId, columnId, value) {
   await callMondayApi('updateStatus', { boardId, itemId, columnId, value });
 }
