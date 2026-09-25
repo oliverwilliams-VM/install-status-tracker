@@ -288,9 +288,9 @@ export default function App() {
   // Hero summary stats, scoped to ONLY the currently viewed week \u2014 not
   // an aggregate across multiple weeks. Issue/Revisit sites are broken out
   // by name so the KPI card can show exactly which sites and why, not just
-  // a bare percentage \u2014 revisitCause is only ever populated for DE today
-  // (the only board with a real "Revisit Cause" column on the item itself),
-  // so this falls back to the site's own Install Phase label everywhere else.
+  // a bare percentage \u2014 every board now has its own real "Revisit Cause"
+  // column, but the Install Phase label is still kept as a fallback in
+  // case a specific item's cause field hasn't been filled in yet.
   const weekSummary = useMemo(() => {
     if (!weekData) return null;
     const all = COUNTRY_ORDER.flatMap((c) => weekData.byCountry[c]);

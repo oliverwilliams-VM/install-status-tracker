@@ -8,6 +8,9 @@
 // - installer: exists as a real status column on UK, NL and DE; IE and FI
 //   have no native "who's doing this install" field, so Resource Allocated
 //   can't be derived for those two countries yet.
+// revisitCause now has its own real column on all 5 boards (added after
+// launch to future-proof the Issue/Revisit KPI breakdown — confirmed IDs,
+// not guessed).
 export const COUNTRY_BOARDS = [
   {
     id: '5678172488',
@@ -23,7 +26,7 @@ export const COUNTRY_BOARDS = [
       siteStatus: 'status9',
       resourceRequested: 'color_mm7eh5sy',
       bandwidth: 'text_mm7er48z',
-      revisitCause: null,
+      revisitCause: 'color_mm7ha5dy',
       linkToSignUp: 'board_relation1__1'
     }
   },
@@ -41,7 +44,7 @@ export const COUNTRY_BOARDS = [
       siteStatus: 'status9__1',
       resourceRequested: 'color_mm7e2q4t',
       bandwidth: 'text_mm7er93n',
-      revisitCause: null,
+      revisitCause: 'color_mm7hrd4g',
       linkToSignUp: 'board_relation_mkmq1n7'
     }
   },
@@ -59,7 +62,7 @@ export const COUNTRY_BOARDS = [
       siteStatus: 'status1__1',
       resourceRequested: 'color_mm7emrab',
       bandwidth: 'text_mm7ezcw7',
-      revisitCause: null,
+      revisitCause: 'color_mm7h66v6',
       linkToSignUp: 'board_relation6__1'
     }
   },
@@ -77,9 +80,6 @@ export const COUNTRY_BOARDS = [
       siteStatus: 'status__1',
       resourceRequested: 'color_mm7ewq9y',
       bandwidth: 'text_mm7ebeyq',
-      // Only DE has this as a real column on the item itself — UK/NL/FI
-      // only link out to a separate "Site Revisit/Replacement tickets"
-      // board, and IE has no revisit-cause tracking at all yet.
       revisitCause: 'color_mm7hat00',
       linkToSignUp: 'board_relation1__1'
     }
@@ -98,7 +98,7 @@ export const COUNTRY_BOARDS = [
       siteStatus: 'status__1',
       resourceRequested: 'color_mm7e224p',
       bandwidth: 'text_mm7et2mf',
-      revisitCause: null,
+      revisitCause: 'color_mm7h1f37',
       linkToSignUp: 'board_relation5__1'
     }
   }
