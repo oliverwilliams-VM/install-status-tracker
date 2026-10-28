@@ -40,6 +40,7 @@ async function fetchAllItemsForBoard(boardId, columnIds) {
           items {
             id
             name
+            created_at
             group { id title }
             column_values(ids: $columnIds) {
               id

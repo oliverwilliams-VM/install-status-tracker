@@ -2,13 +2,13 @@ import { useState, useEffect, useMemo } from 'react';
 import { RefreshCw, AlertCircle, AlertTriangle, CheckCircle2, XCircle, Maximize2, Minimize2, Download, ChevronLeft, ChevronRight, CalendarDays } from 'lucide-react';
 import { fetchCountryItems, fetchReadinessItems, updateCountryItemField } from './lib/mondayClient';
 import { translateTexts } from './lib/translate';
-import { COUNTRY_BOARDS, READINESS_BOARDS, isAffirmative, classifyInstallOutcome } from './lib/boards';
+import { COUNTRY_BOARDS, READINESS_BOARDS, isAffirmative, classifyInstallOutcome, readinessKey } from './lib/boards';
 import { Button } from './components/ui/button';
 
 const FLAGS = { UK: '\u{1F1EC}\u{1F1E7}', IE: '\u{1F1EE}\u{1F1EA}', NL: '\u{1F1F3}\u{1F1F1}', DE: '\u{1F1E9}\u{1F1EA}', FI: '\u{1F1EB}\u{1F1EE}' };
 const COUNTRY_ORDER = COUNTRY_BOARDS.map((b) => b.country);
 const COUNTRY_ACCENT = { UK: 'hsl(var(--chart-1))', IE: 'hsl(var(--chart-2))', NL: 'hsl(var(--chart-3))', DE: 'hsl(var(--chart-4))', FI: 'hsl(var(--chart-5))' };
-const COUNTRIES_WITH_READINESS_BOARD = new Set(READINESS_BOARDS.map((b) => b.country));
+const COUNTRIES_WITH_READINESS_BOARD = new Set(READINESS_BOARDS.flatMap((b) => b.countries || [b.country]));
 // Quick-access offsets from "this week" (0). Anything beyond these is
 // still reachable via the Prev/Next arrows or the date-jump picker \u2014
 // this is just what gets its own always-visible button.
@@ -110,10 +110,10 @@ function StatusPill({ value }) {
   const v = value.toLowerCase();
   const isGood = v === 'yes' || v === 'ja' || v === 'jaa' || v === 'kicked off' || v === 'delivered' || v === 'done' || v === 'not required' || v === 'received';
   const isBad = v === 'no' || v === 'nein' || v === 'nee' || v === 'not sent' || v.includes('risk') || v.includes('issue') || v.includes('cancel');
-  const color = isGood ? 'hsl(var(--status-complete))' : isBad ? 'hsl(var(--destructive))' : 'hsl(var(--status-scheduled))';
+  const color = isGood ? '#70CFFF' : isBad ? '#FFD54A' : '#E0E7EF';
   return (
     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style={{ backgroundColor: `${color}22`, color }}>
-      {value}
+      {isGood ? '✓ ' : isBad ? '⚠ ' : ''}{value}
     </span>
   );
 }
@@ -272,7 +272,7 @@ export default function App() {
     const byCountry = {};
     COUNTRY_ORDER.forEach((c) => { byCountry[c] = []; });
     inWeek.forEach((item) => {
-      const readiness = readinessByStoreId.get(item.name.trim());
+      const readiness = readinessByStoreId.get(readinessKey(item.country, item.name));
       const enriched = { ...item, readiness };
       byCountry[item.country].push({
         ...enriched,
@@ -492,8 +492,9 @@ export default function App() {
                           <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Kicked Off</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">HW Status</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Resource Allocated</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">SFK Table Ordered</th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Peds Delivered</th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">Readiness Notes</th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-muted-foreground">FZE Readiness Notes</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
@@ -514,6 +515,7 @@ export default function App() {
                             <td className="px-4 py-2.5"><StatusPill value={site.kickOff} /></td>
                             <td className="px-4 py-2.5"><StatusPill value={displayHardwareStatus(site.hardwareStatus)} /></td>
                             <td className="px-4 py-2.5"><StatusPill value={deriveResourceAllocated(site.installer)} /></td>
+                            <td className="px-4 py-2.5"><StatusPill value={site.readiness?.tableOrdered ?? 'Unconfirmed'} /></td>
                             <td className="px-4 py-2.5">
                               <StatusPill value={
                                 site.readiness
@@ -532,6 +534,8 @@ export default function App() {
                                   </span>
                                 ) : '\u2014'
                               ) : 'No readiness form submitted yet'}
+                              {site.readiness?.previousResponses?.length > 0 && <details className="mt-2"><summary>Earlier FZE responses ({site.readiness.previousResponses.length})</summary>{site.readiness.previousResponses.map((response) => <p key={response.id} className="mt-2 border-t border-border pt-2"><strong>{response.submittedAt || response.date}</strong><br />{response.finalConfirmation || 'No comments supplied'}</p>)}</details>}
+                              {site.readiness && <div className="mt-1 text-[10px]">Submitted {site.readiness.submittedAt || site.readiness.date || 'date unavailable'} · legacy store-level response</div>}
                             </td>
                           </tr>
                         ))}

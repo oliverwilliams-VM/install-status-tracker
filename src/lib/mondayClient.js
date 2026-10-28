@@ -1,4 +1,4 @@
-import { COUNTRY_BOARDS, READINESS_BOARDS, READINESS_COLUMNS } from './boards';
+import { COUNTRY_BOARDS, READINESS_BOARDS, READINESS_COLUMNS, READINESS_EXTRA_COLUMNS, readinessKey } from './boards';
 
 async function callMondayApi(action, payload) {
   const res = await fetch('/api/monday', {
@@ -43,11 +43,14 @@ function shapeCountryItem(rawItem, board) {
   };
 }
 
-function shapeReadinessItem(rawItem) {
+function shapeReadinessItem(rawItem, board) {
   const valuesById = {};
   rawItem.column_values.forEach((cv) => { valuesById[cv.id] = cv.text; });
   return {
     id: rawItem.id,
+    submittedAt: rawItem.created_at || null,
+    tableOrdered: valuesById[READINESS_EXTRA_COLUMNS[board.country]?.tableOrdered] || null,
+    floorplan: valuesById[READINESS_EXTRA_COLUMNS[board.country]?.floorplan] || null,
     storeId: (valuesById[READINESS_COLUMNS.storeId] || '').trim(),
     date: valuesById[READINESS_COLUMNS.date] ?? null,
     contactName: valuesById[READINESS_COLUMNS.contactName] ?? null,
@@ -77,7 +80,7 @@ export async function fetchCountryItems() {
 export async function fetchReadinessItems() {
   const boardsPayload = READINESS_BOARDS.map((b) => ({
     id: b.id,
-    columnIds: Object.values(READINESS_COLUMNS)
+    columnIds: [...Object.values(READINESS_COLUMNS), ...Object.values(READINESS_EXTRA_COLUMNS[b.country] || {})]
   }));
   const { results } = await callMondayApi('multiItems', { boards: boardsPayload });
 
@@ -85,13 +88,16 @@ export async function fetchReadinessItems() {
   results.forEach((r) => {
     const board = READINESS_BOARDS.find((b) => b.id === r.boardId);
     r.items.forEach((raw) => {
-      const shaped = { ...shapeReadinessItem(raw), country: board.country };
+      const shaped = { ...shapeReadinessItem(raw, board), country: board.country };
       if (!shaped.storeId) return;
       // A store can submit more than once (corrections, resubmissions) \u2014
       // keep whichever submission has the latest date.
-      const existing = itemsByStoreId.get(shaped.storeId);
-      if (!existing || (shaped.date && (!existing.date || shaped.date > existing.date))) {
-        itemsByStoreId.set(shaped.storeId, shaped);
+      const key = readinessKey(board.country, shaped.storeId);
+      const existing = itemsByStoreId.get(key);
+      if (!existing || (shaped.submittedAt || shaped.date || '') > (existing.submittedAt || existing.date || '')) {
+        itemsByStoreId.set(key, { ...shaped, previousResponses: existing ? [...(existing.previousResponses || []), { ...existing, previousResponses: undefined }] : [] });
+      } else {
+        existing.previousResponses = [...(existing.previousResponses || []), shaped];
       }
     });
   });

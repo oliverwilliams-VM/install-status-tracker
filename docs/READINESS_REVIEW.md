@@ -1,0 +1,75 @@
+# Subway readiness portal — review build
+
+Prepared 28 October 2026. Calendar days; Europe/London. This branch is for Oliver's review, not a live cutover.
+
+## Open and exercise
+
+Open `/?view=readiness-review` on the branch preview. It is isolated from the existing tracker at `/`.
+
+1. Save a call snapshot on **Burndown room**.
+2. Open **Franchisee portal**. Choose UK/IE for English, NL for Dutch or DE for German.
+3. Submit a fictional response with one No answer. It is recorded, the reminder planner stops, and the gap remains in the call view.
+4. Return to the burndown room and inspect **Since the last call**.
+5. Open a restaurant to review SFK table status, PED return/order stages, kit tracking, action owner/due date and VM notes. Internal notes are hidden by default; shared notes appear in the call table. This is a presentation filter, not an authorization boundary.
+6. Open **Emails & timing**, select each language and the final chaser. Verify FZE To, MFP CC, subject, body, plain text and dates.
+7. Download review JSON if wanted. Reset only clears the fictional review state in that browser.
+
+The review uses fictional `999990–999997` stores and `.example` addresses. Responses, photos, snapshots and notes are local to that review browser. Do not put real personal data into it. Photo names/counts remain in history. Files are not uploaded in review mode. No real sender, trigger or Monday mutation is invoked by any review action.
+
+## Delivered source
+
+- `src/readiness/ReadinessApp.jsx`: complete review portal/burndown UI and token-bound recipient view.
+- `src/readiness/model.js`: shared date, reminder, validation, reschedule and snapshot rules.
+- `src/readiness/copy.js`: English, Dutch and German form and email copy.
+- `api/readiness.js`: POST-only recipient API; disabled unless explicitly configured. Same-origin check, signed expiring bearer link, server validation, file limits and authenticated coordinator calls.
+- `server/operator-service.js`: invitation/link preparation for the reviewed Brain workflow. No public operator endpoint.
+- `server/readiness-core.js`: durable request state transitions, reservations, idempotent submission receipts, invalidated old revisions and Sent-only markers.
+- `integrations/ReadinessCoordinator.gs` and generated `ReadinessCore.gs`: standalone Google coordinator. Private Drive state/archive and ScriptLock. Existing PED coordinator and existing Brain source are untouched.
+- `tests/readiness.test.js`: automated behavior, security and simulated coordinator filing tests. Mocks are not live integration acceptance.
+
+## Readiness rules
+
+Initial request: install −10 calendar days. Chaser 1: −7, if no response. Chaser 2: −5, if no response; store MFP copied. A missing verified FZE address blocks all delivery; missing MFP blocks the final escalation. No guessed/default recipients. Submission stops form chasers even when answers indicate blockers. No reminder once installation has started, completed, been cancelled or postponed.
+
+Late arrivals receive one consolidated current request rather than three overdue messages; at/after −5 it includes the MFP. No second message for the same installation on the same calendar date. Later runs select only the latest due stage. Rescheduling requires source verification, increments the request revision, invalidates the old token, preserves earlier answers in history and resets current readiness. It is blocked while an external operation is uncertain.
+
+The FZE confirms PEDs **received**. Form **returned** and PED **ordered** are separate operational facts from the existing PED process. The portal neither initiates PED orders nor sets their milestones from checklist activity.
+
+## Existing tracker corrections on this branch
+
+Pulls the existing SFK table response from the verified country-specific column IDs. UKI responses can appear for Ireland. Readiness joins are market-scoped (UK/IE share the UKI board); identical store numbers in DE/NL cannot overwrite each other. Latest response uses server creation time and keeps earlier comments. Existing German translation behavior remains.
+
+Legacy UKI responses contain no verified country/installation binding. They remain legacy evidence, not proof of readiness for a rescheduled installation. New submissions retain the exact binding in canonical archive metadata. Production integration must prefer exact request/revision metadata and label legacy responses explicitly. Do not infer an exact job from a store number alone.
+
+## Source-of-truth and migration
+
+The three old **form entry points** can be retired after cutover, while their Monday boards remain the historical response store. One new portal writes through a controlled server adapter to the appropriate board; it does not delete, rename or overwrite historical submissions. Each new submission creates a new response with the same existing form fields and canonical request/revision metadata in a Monday item update. Country routing: UK/IE → 18379251681; DE → 18391075175; NL → 18396748434. Later consolidation into a single board is a separate migration, not required to have a single portal.
+
+Table IDs: UKI `single_select9i5gdtk`; DE `single_selectztongf2`; NL `single_selectojxswdf`. Other new form fields must use their actual IDs; the countries are not identical schemas. Canonical Yes/No/Pending answers are archived without translation loss. Existing binary Monday columns mirror Pending conservatively as No; the original Pending remains in canonical metadata. The form never guesses Not Applicable for unknown installation types.
+
+Photos stay in a private Drive archive with the request binding; the Monday metadata records their IDs. No public evidence links are generated. Existing historical photo fields are preserved. Approve retention and team access before activation.
+
+## Production wiring — exact dependencies, no invented IDs
+
+Keep protected preview access. Do not enable recipient access or send any FZE email until the following are complete:
+
+1. Obtain and inspect the current installed Brain readiness sender and trigger inventory. The actual seven-trigger production Apps Script project is not contained in `install-status-tracker` or `brian-direct-sign`. The existing PED handover explicitly says not to invent its welcome/sender entry points. Do not recreate a parallel sender or install a new scheduled task here.
+2. Map exact current Brain item → country install item, install date/type, FZE and store-specific MFP. Preserve aliases UK/GB and IE/IRL. Verify every live mapping and recipient against source. `RD_SOURCE_MAP` has no defaults: `brainBoardId`, `installLinkColumn`, `countryColumn`, `fzeEmailColumn`, `mfpEmailColumn`, `installDateColumn` must all be supplied from current source. Known Brain ID is 18432365825; Sign Up relationship `board_relation_mm7s293s` is NOT assumed to be the install-item relationship.
+3. Deploy the readiness coordinator in its **own** Google Apps Script project. Do not replace the installed FreedomPay/PED `doPost` or reuse its credential namespace. Add the two .gs files. Create private state/archive folders in the existing account; no paid storage.
+4. Set private Script Properties: `RD_RPC_SECRET` (at least 32 random characters), `RD_STATE_FOLDER_ID`, `RD_ARCHIVE_FOLDER_ID`, `RD_MONDAY_TOKEN`, reviewed `RD_SOURCE_MAP`. All capabilities default off. `RD_ENABLED=YES` enables authenticated RPC, `RD_OPERATOR_ENABLED=YES` allows reviewed issue/reschedule/note operations, `RD_WRITES_APPROVED=YES` permits response filing. `RD_SEND_APPROVED` remains unset through review.
+5. Set Vercel runtime values: `READINESS_COORDINATOR_URL` (standalone Apps Script /exec), `READINESS_RPC_SECRET`, separate `READINESS_LINK_SECRET` (at least 32 random characters), `READINESS_PORTAL_ORIGIN` (exact HTTPS origin). `READINESS_BACKEND_ENABLED` stays unset until supervised acceptance. Secrets are never committed or requested in chat.
+6. Call `prepareInvitation` server-side from the existing verified Brain process. The coordinator rechecks native store/board/date and the exact Brain relationship/recipients; it does not trust browser identity. A recipient cannot change store/country/date by editing the URL or form. Credentials travel in a URL fragment and the Authorization header, not URL query strings. Links expire two days after installation, and current native installation status/date is rechecked on opening, submission and dispatch.
+7. Integrate `RD_dispatchWithExistingSender(recordId, portalUrl, sender)` into the existing readiness schedule. The adapter must use the existing sender and reconcile its exact Gmail Sent receipt. It must return `{sentMessageId,receiptVerified:true}` only when independently confirmed Sent. A draft, Gmail API attempt or prepared copy is not Sent. No trigger or delivery transport has been installed by this branch.
+8. Wire the full burndown view to existing operational sources. Review edits are deliberately fictional/local. Production PED return/order must use the already verified PED milestones; Brian must supply his shipping field/link mapping. Use an authenticated internal service for notes/snapshots; local review filtering is not production access control.
+9. Test internal requests for UK, IE, NL and DE, photos, duplicated concurrent submission, source date/status changes, missing MFP, delayed sender outcome and reschedule. Verify private evidence and source/recipient access. Approve the actual email copy and cutover diff.
+10. Reconcile legacy responses/open reminders, switch the existing readiness sender to the new link and close old forms to new submissions. Retain all historical responses and existing PED, welcome, H&K and confirmed-install workflows.
+
+## Reconciliation and rollback
+
+Every external filing is preceded by a durable reservation. The coordinator saves archive and Monday item receipts before proceeding. If a timeout/failure occurs, the pending phase blocks retries instead of silently creating another response. Operator recovery must inspect the exact Drive files and Monday item/update before clearing/replaying. This deliberately requires a human reconciliation tool/process; no automatic reset of uncertain operations is provided.
+
+For an issue: unset `RD_SEND_APPROVED`, `READINESS_BACKEND_ENABLED` and `RD_WRITES_APPROVED`; pause only the reviewed readiness integration. Keep evidence and reservations. Do not restart legacy chasers blindly: reconcile what was already sent and submitted first. The original tracker and current forms are untouched on main, so closing this PR removes the preview with no live migration to undo.
+
+## Validation status
+
+22 automated tests passed, including simulated end-to-end Drive/Monday filing and failure-after-item-creation duplicate prevention. Production build passed. Browser checks: English submission with No creates a visible blocker; call snapshot records the readiness change; Dutch SFK and German non-SFK pages select the correct questions/language; historic FZE comment remains visible. These checks do not certify live Google/Monday/Gmail setup.
