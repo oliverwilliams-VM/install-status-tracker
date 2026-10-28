@@ -32,6 +32,7 @@ export function validateBinding(b) {
 }
 export function validateAnswers(answers, installType, binding = {}) {
   if (!answers || typeof answers !== 'object' || Array.isArray(answers)) throw Error('Answers required');
+  if (answers.responseFormat === 'quick-v1') answers = expandQuickResponse(answers, binding);
   const fields = ['team', 'area', 'powerData', 'peds', 'floorplan'];
   const out = {};
   for (const key of fields) {
@@ -48,6 +49,7 @@ export function validateAnswers(answers, installType, binding = {}) {
   if (!out.name) throw Error('Contact name required');
   if (answers.schemaVersion === 2) {
     out.schemaVersion = 2;
+    if(answers.responseFormat === 'quick-v1'){out.responseFormat='quick-v1';out.quickConfirmations=answers.quickConfirmations;out.evidenceDelivery=answers.evidenceDelivery;out.otherIssues=answers.otherIssues;}
     out.tableOrderDate = '';
     out.tableDeliveryStatus = '';
     if (installType === 'sfk') {
@@ -110,7 +112,7 @@ export function requiredReadinessChecks(a, type) {
     ...(a.storeType !== 'trading' ? ['openingDateKnown', 'openingDateConfirmed', 'worksComplete', ...(a.worksComplete !== 'yes' ? ['worksCompletionKnown'] : [])] : [])];
 }
 export function readinessGaps(a, type, binding = {}) {
-  const labels = { team: 'Store team prepared', area: 'Installation area', powerData: 'Power and data installed', peds: 'PEDs received', floorplan: 'Floorplan confirmation', table: 'SFK table ordered', installDateConfirmed: 'Installation date confirmation', tableInStore: 'SFK table in store', tableAssembled: 'SFK table assembled and positioned', tableDeliveryKnown: 'Table delivery date unknown', worksCompletionKnown: 'Building works completion date unknown', powerTested: 'Power and data tested', pedQuantityConfirmed: 'Correct PED quantity', kitDelivered: 'Kit delivered', kitComplete: 'Kit complete', kitUndamaged: 'Kit undamaged', kitSecure: 'Kit securely stored', permits: 'Access permits', accessConfirmed: 'Access arrangements', networkOnline: 'Internet connection', networkPrepared: 'Network preparation', handoverAvailable: 'Contact available for handover', openingDateKnown: 'Opening/reopening date unknown', openingDateConfirmed: 'Opening/reopening date confirmation', worksComplete: 'Building works complete', goLiveDateKnown: 'Required go-live date unknown' };
+  const labels = { team: 'Store team prepared', area: 'Installation area', powerData: 'Power and data installed', peds: 'PEDs received', floorplan: 'Floorplan confirmation', table: 'SFK table ordered', installDateConfirmed: 'Installation date confirmation', tableInStore: 'SFK table in store', tableAssembled: 'SFK table assembled and positioned', tableDeliveryKnown: 'Table delivery date unknown', worksCompletionKnown: 'Building works completion date unknown', powerTested: 'Power and data tested', pedQuantityConfirmed: 'Correct PED quantity', kitDelivered: 'Hardware delivered', kitComplete: 'Hardware complete', kitUndamaged: 'Hardware undamaged', kitSecure: 'Hardware securely stored', permits: 'Access permits', accessConfirmed: 'Access arrangements', networkOnline: 'Internet connection', networkPrepared: 'Network preparation', handoverAvailable: 'Contact available for handover', openingDateKnown: 'Opening/reopening date unknown', openingDateConfirmed: 'Opening/reopening date confirmation', worksComplete: 'Building works complete', goLiveDateKnown: 'Required go-live date unknown' };
   const fields = ['team', 'area', 'powerData', 'peds', 'floorplan', ...(type === 'sfk' ? ['table'] : []), ...requiredReadinessChecks(a, type)];
   const gaps = fields.filter(k => a[k] !== 'yes').map(k => labels[k]);
   if (type === 'sfk' && a.tableInStore === 'no' && a.tableDeliveryStatus === 'unknown') gaps.push('Table delivery date unknown');
@@ -207,7 +209,37 @@ export function verifiedProjectType(values) {
 }
 export function equipmentTypeFromMonday(value) {
   const v = String(value || '').trim().toLowerCase();
-  if (['sfk 22in','sfk 15in','small format kiosk'].includes(v)) return 'sfk';
+  if (hasSfkReference(v)) return 'sfk';
   if (['27in single-sided','27in double-sided','27in wall-mounted','27" bau kiosks','22in flyte'].includes(v)) return 'other';
   throw Error('Missing or unsupported Monday equipment type');
+}
+
+export function hasSfkReference(value) { return /\bsfk\b|small[\s-]+format[\s-]+kiosks?|\bsmall[\s-]+form[\s-]+factor\b/i.test(Array.isArray(value) ? value.join(' ') : String(value || '')); }
+export function quickGroups(projectType) { return [
+ {key:'powerNetwork',fields:['powerData','powerTested','networkOnline','networkPrepared']},
+ {key:'hardwareReady',fields:['kitDelivered','kitComplete','kitUndamaged','kitSecure']},
+ {key:'terminalsReady',fields:['peds','pedQuantityConfirmed']},
+ {key:'siteReady',fields:['floorplan','area',...(projectType!=='trading'?['worksComplete']:[])]},
+ {key:'accessHandover',fields:['team','permits','accessConfirmed','handoverAvailable']}
+]; }
+export function quickDetailFields(group,a) {return group.fields.filter(k=>!((['kitComplete','kitUndamaged','kitSecure'].includes(k)&&a.kitDelivered!=='yes')||(k==='pedQuantityConfirmed'&&a.peds!=='yes')||(k==='powerTested'&&a.powerData!=='yes')));}
+export function expandQuickResponse(input,binding) {
+ const a={...input};
+ for(const g of quickGroups(binding.projectType)){const value=a.quickConfirmations?.[g.key];if(!['yes','no','pending'].includes(value))throw Error('Answer each readiness confirmation');if(value==='yes')for(const k of g.fields)a[k]='yes';else {for(const k of quickDetailFields(g,a))if(!['yes','no','pending'].includes(a[k]))throw Error('Identify outstanding preparation');if(g.fields.every(k=>a[k]==='yes'))throw Error('Overall confirmation conflicts with detailed answers');}}
+ if(a.quickConfirmations.accessHandover==='yes')a.accessInstructions='No access exceptions reported';
+ if(!['yes','no'].includes(a.otherIssues))throw Error('Other issues answer required');if(a.otherIssues==='no')a.comments='None';
+ if(!['now','shared','later'].includes(a.evidenceDelivery))throw Error('Evidence delivery answer required');
+ if(a.evidenceDelivery!=='now'){a.evidenceCategories=[];a.evidenceStatus={};a.evidenceReasons={};for(const category of requiredEvidence(a,binding.installType)){a.evidenceStatus[category]='pending';a.evidenceReasons[category]=a.evidenceDelivery==='shared'?'FZE reports evidence already shared; VM must link and verify it':'FZE will provide evidence separately';}}
+ const gaps=readinessGaps({...a,storeType:binding.projectType},binding.installType,binding).filter(x=>!x.endsWith('photo outstanding'));
+ if(!gaps.length&&a.otherIssues==='no'){a.exceptionDetails='None';a.exceptionOwner='None';a.resolutionDateKnown='pending';a.exceptionDue='';}
+ return a;
+}
+
+export function equipmentScopeFromSources(primary, references = []) { return hasSfkReference([primary, ...references]) ? 'sfk' : equipmentTypeFromMonday(primary); }
+
+export function quickNeedsActions(a,b) {
+ if(Object.values(a.quickConfirmations||{}).some(v=>v==='no'||v==='pending')||a.otherIssues==='yes')return true;
+ const checks=['installDateConfirmed','goLiveDateKnown',...(b.projectType!=='trading'?['openingDateKnown','openingDateConfirmed']:[]),...(b.installType==='sfk'?['table','tableInStore',...(a.tableInStore==='yes'?['tableAssembled']:[])]:[])];
+ if(checks.some(k=>a[k]==='no'||a[k]==='pending'))return true;
+ return Boolean((a.goLiveDate&&a.goLiveDate<b.installDate)||(a.openingDate&&a.openingDate<b.installDate)||(a.tableInStore==='no'&&a.tableDelivery&&a.tableDelivery>=b.installDate));
 }

@@ -131,7 +131,7 @@ function RD_projectEvidence_(brain,p){
  var s={};signup.column_values.forEach(function(c){s[c.id]=c;});
  var raw=[(v.color_mm7f7r9d||{}).text,(s.dup__of_store_type5__1||{}).text];
  if((s.label7||{}).text)raw.push(s.label7.text);
- return {projectType:verifiedProjectType(raw),installType:equipmentTypeFromMonday((v.dropdown_mm7ftf76||{}).text),brainProjectColumn:'color_mm7f7r9d',signupItemId:String(signup.id),signupOpeningColumn:'dup__of_store_type5__1',signupProjectColumn:'label7',rawLabels:raw};
+ return {projectType:verifiedProjectType(raw),installType:equipmentScopeFromSources((v.dropdown_mm7ftf76||{}).text,[(s.color_mkwjhm4b||{}).text,(s.dup__of_layout_type_bau1__1||{}).text]),brainProjectColumn:'color_mm7f7r9d',signupItemId:String(signup.id),signupOpeningColumn:'dup__of_store_type5__1',signupProjectColumn:'label7',rawLabels:raw};
 }
 function RD_assertProjectCurrent_(record,p){
  var id=(record.sourceReference||{}).brainItemId;if(!id)throw Error('Verified Brain project binding required');

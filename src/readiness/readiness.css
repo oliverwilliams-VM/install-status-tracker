@@ -13,3 +13,4 @@
 .rd-brand img:last-child{background:#171717;padding:8px 12px;border-radius:5px;box-sizing:content-box}
 
 .rd-sfk-table{display:flex;flex-direction:column;gap:20px;padding:20px;border:2px solid #87bdd9;border-radius:8px;background:#f2f9fd}.rd-sfk-table h3{font-size:17px;font-weight:700;margin:0}.rd-sfk-table>p{margin:0}
+.rd-quick-checks{gap:16px}.rd-quick-details{padding:14px;margin:10px 0 0;border-left:3px solid #d2a82d;background:#fff8df;display:flex;flex-direction:column;gap:14px}.rd-quick-checks fieldset{padding:15px}.rd-quick-checks .rd-answers label{padding:10px 12px}.rd-portal .rd-form{gap:18px}
