@@ -120,3 +120,8 @@ A translated **This project type is not correct — contact the team** route col
 After the team corrects Monday, the protected `rebindContext` transition independently verifies the revised sources, preserves previous context/answers/issue in history, replaces the token, increments the revision and clears current readiness/approval. It cannot move the request to another installation. `prepareInvitation` uses this transition for revisions after the first. The existing schedule and recipient process must distribute the replacement link; no new sender is installed here.
 
 Validation: 41 tests passed, including missing/conflicting type sources, server refusal of respondent type changes, mismatch-report idempotency, one-time Monday update, current-source rechecks, link invalidation and immutable installation identity. Browser verified read-only NRO context, Remodel + SFK questions and a reported discrepancy holding the form. Production build passed; live activation is still disabled.
+
+## SFK tables on every project journey
+The SFK table section is controlled solely by the verified kiosk/equipment scope, independently of NRO, Remodel or Retrofit. Every SFK journey shows the same mandatory order/date/delivered/ETA/assembly questions. A highlighted SFK table section makes this visible in the form. Non-SFK journeys omit it. Rendering tests cover all four markets and all three project contexts, including required order/date and delivery ETA controls.
+
+Validation of this rule: 53 tests passed, including actual component rendering for every combination of UK/IE/NL/DE and NRO/Remodel/trading, with SFK questions present and non-SFK questions omitted. Production build passed.
