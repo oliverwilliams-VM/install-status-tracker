@@ -1,3 +1,4 @@
+import { EXTRA_COPY } from './extra-copy.js';
 import { MARKETS, market } from './model.js';
 export const COPY = {
   en: {
@@ -19,7 +20,7 @@ export const COPY = {
     mailSubject: 'Vorbereitung auf die Installation', invitation: 'Bitte bestätigen Sie, ob Ihr Restaurant für die Installation bereit ist.', chase1: 'Eine Erinnerung: Bitte füllen Sie Ihr Bereitschaftsupdate für die Installation aus.', chase2: 'Ihre Rückmeldung zur Installationsbereitschaft steht noch aus. Ihr MFP ist zur Unterstützung in Kopie.', late: 'Ihre Installation steht bevor. Bitte füllen Sie Ihr Bereitschaftsupdate so bald wie möglich aus.', mailAction: 'Bereitschaft bestätigen', mailClose: 'Falls etwas noch nicht bereit ist, teilen Sie uns dies im Formular mit, damit das Team helfen kann.', signature: 'Vita Mojo – Subway EMEA Team'
   }
 };
-export function copyFor(country) { return COPY[MARKETS[market(country)]]; }
+export function copyFor(country) { const lang = MARKETS[market(country)]; return { ...COPY[lang], ...EXTRA_COPY[lang] }; }
 const escape = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export function emailPreview(record, plan, url) {
   const c = copyFor(record.binding.country);

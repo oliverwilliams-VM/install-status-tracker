@@ -8,7 +8,7 @@ function doPost(e) {
  try {
   if(p.getProperty('RD_ENABLED')!=='YES'||secret.length<32)throw Error('Readiness coordinator disabled');
   var w=JSON.parse(e.postData.contents);nonce=w.nonce;
-  if(!/^[a-f0-9]{64}$/.test(nonce||'')||!Number.isSafeInteger(w.timestamp)||Math.abs(Date.now()-w.timestamp)>60000||typeof w.payload!=='string'||w.payload.length>3100000||!RD_equal_(RD_mac_(secret,w.timestamp+'\n'+nonce+'\n'+w.payload),w.mac))throw Error('Invalid RPC');
+  if(!/^[a-f0-9]{64}$/.test(nonce||'')||!Number.isSafeInteger(w.timestamp)||Math.abs(Date.now()-w.timestamp)>60000||typeof w.payload!=='string'||w.payload.length>4100000||!RD_equal_(RD_mac_(secret,w.timestamp+'\n'+nonce+'\n'+w.payload),w.mac))throw Error('Invalid RPC');
   if(!lock.tryLock(15000))throw Error('Coordinator busy');held=true;
   var all=p.getProperties(),nonceKey='RD_NONCE_'+nonce;
   Object.keys(all).forEach(function(k){if(k.indexOf('RD_NONCE_')===0&&Number(all[k])<Date.now())p.deleteProperty(k);});
@@ -18,7 +18,7 @@ function doPost(e) {
   var save=function(r){var encoded=JSON.stringify(r);if(encoded.length>1500000)throw Error('Archive capacity requires review');if(file)file.setContent(encoded);else file=folder.createFile(c.id+'.json',encoded,'application/json');if(file.getBlob().getDataAsString()!==encoded)throw Error('State write unconfirmed');};
   if(c.operation==='submit')out={ok:true,result:RD_submit_(record,c,save,p)};
   else {
-   if(['issue','reschedule','cancel','reserveMail','confirmSent','note'].indexOf(c.operation)>=0&&p.getProperty('RD_OPERATOR_ENABLED')!=='YES')throw Error('Operator transitions disabled');
+   if(['issue','reschedule','cancel','reserveMail','confirmSent','note','review'].indexOf(c.operation)>=0&&p.getProperty('RD_OPERATOR_ENABLED')!=='YES')throw Error('Operator transitions disabled');
    if(c.operation==='issue'||c.operation==='reschedule'){if(c.binding&&c.binding.id!==c.id)throw Error('Request binding mismatch');RD_verifySource_(c,p);}
    if(c.operation==='open')RD_assertCurrent_(record,p);
    var result=reduce(record,c,Date.now());if(c.operation!=='open'&&c.operation!=='plan')save(result.record);out={ok:true,result:result.result};
@@ -61,12 +61,12 @@ function RD_submit_(previous,c,save,p){
  var archiveFolder=DriveApp.getFolderById(p.getProperty('RD_ARCHIVE_FOLDER_ID'));
  r.pendingSubmission.phase='archive-started';save(r);
  var names=(c.files||[]).map(function(f,i){
-  if(['image/jpeg','image/png'].indexOf(f.mime)<0||!f.data||f.data.length>1400000)throw Error('Invalid evidence');
-  var bytes=Utilities.base64Decode(f.data);if(bytes.length>1048576)throw Error('Photo too large');
+  if(['image/jpeg','image/png'].indexOf(f.mime)<0||!f.data||f.data.length>970000)throw Error('Invalid evidence');
+  var bytes=Utilities.base64Decode(f.data);if(bytes.length>716800)throw Error('Photo too large');
   var ext=f.mime==='image/png'?'.png':'.jpg',name=r.binding.id+'-'+c.submissionId+'-'+i+ext;
-  var file=archiveFolder.createFile(Utilities.newBlob(bytes,f.mime,name));return {id:file.getId(),name:f.name,mime:f.mime};
+  var file=archiveFolder.createFile(Utilities.newBlob(bytes,f.mime,name));return {id:file.getId(),name:f.name,mime:f.mime,category:f.category};
  });
- var archive={binding:r.binding,revision:r.revision,submissionId:c.submissionId,at:r.pendingSubmission.at,answers:r.pendingSubmission.answers,files:names,digest:c.digest};
+ var archive={binding:r.binding,revision:r.revision,submissionId:c.submissionId,at:r.pendingSubmission.at,answers:r.pendingSubmission.answers,files:names,acknowledgement:r.pendingSubmission.acknowledgement,digest:c.digest};
  var archiveFile=archiveFolder.createFile(r.binding.id+'-'+c.submissionId+'.json',JSON.stringify(archive),'application/json');
  if(archiveFile.getBlob().getDataAsString()!==JSON.stringify(archive))throw Error('Archive verification failed');
  r.pendingSubmission.archiveId=archiveFile.getId();r.pendingSubmission.files=names;r.pendingSubmission.phase='monday-started';save(r);
@@ -80,7 +80,7 @@ function RD_submit_(previous,c,save,p){
  var result=RD_monday_('mutation($b:ID!,$n:String!,$v:JSON!){create_item(board_id:$b,item_name:$n,column_values:$v){id}}',{b:board,n:r.binding.store,v:JSON.stringify(columns)},p),itemId=result.create_item.id;
  r.pendingSubmission.mondayItemId=itemId;r.pendingSubmission.phase='metadata-started';save(r);
  // Exact binding/canonical answers retained in an update, separate from visible FZE comments.
- RD_monday_('mutation($i:ID!,$body:String!){create_update(item_id:$i,body:$body){id}}',{i:itemId,body:'READINESS_PORTAL_V1\n'+JSON.stringify({binding:r.binding,revision:r.revision,submissionId:c.submissionId,at:archive.at,answers:a,archiveId:archiveFile.getId(),files:names})},p);
+ RD_monday_('mutation($i:ID!,$body:String!){create_update(item_id:$i,body:$body){id}}',{i:itemId,body:'READINESS_PORTAL_V1\n'+JSON.stringify({binding:r.binding,revision:r.revision,submissionId:c.submissionId,at:archive.at,answers:a,acknowledgement:archive.acknowledgement,archiveId:archiveFile.getId(),files:names})},p);
  var committed=reduce(r,Object.assign({},c,{operation:'commitSubmission',archiveId:archiveFile.getId(),mondayItemId:itemId,files:names}),Date.now());save(committed.record);return committed.result;
 }
 /** Call from the existing reviewed readiness sender. No trigger or new sender here.

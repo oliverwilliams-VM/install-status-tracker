@@ -29,7 +29,7 @@ export function validateBinding(b) {
   if (expected !== b.boardId) throw Error('Country and install board do not match');
   return b;
 }
-export function validateAnswers(answers, installType) {
+export function validateAnswers(answers, installType, binding = {}) {
   if (!answers || typeof answers !== 'object' || Array.isArray(answers)) throw Error('Answers required');
   const fields = ['team', 'area', 'powerData', 'peds', 'floorplan'];
   const out = {};
@@ -45,12 +45,83 @@ export function validateAnswers(answers, installType) {
     out[key] = answers[key].trim();
   }
   if (!out.name) throw Error('Contact name required');
+  if (answers.schemaVersion === 2) {
+    out.schemaVersion = 2;
+    if (answers.acknowledgementAccepted !== true) throw Error('Acknowledgement required');
+    out.acknowledgementAccepted = true;
+    out.acknowledgementVersion = 'readiness-ack-v1';
+    if (!out.comments) throw Error('Comments require an answer; use None if not applicable');
+    if (!['trading', 'new', 'remodel'].includes(answers.storeType)) throw Error('Store type required');
+    out.storeType = answers.storeType;
+    for (const key of requiredReadinessChecks(answers, installType)) {
+      if (!['yes', 'no', 'pending'].includes(answers[key])) throw Error('Answer every applicable readiness question');
+      out[key] = answers[key];
+    }
+    for (const key of ['siteContact', 'contactPhone', 'accessHours', 'accessInstructions', 'exceptionDetails', 'exceptionOwner']) {
+      if (typeof answers[key] !== 'string' || answers[key].length > (['exceptionDetails', 'accessInstructions'].includes(key) ? 2000 : 150)) throw Error('Invalid contact or action details');
+      out[key] = answers[key].trim();
+    }
+    if (!out.siteContact || !out.contactPhone || !out.accessHours || !out.accessInstructions || !out.exceptionDetails || !out.exceptionOwner) throw Error('Site contact, phone and access hours required');
+    out.tableDelivery = installType === 'sfk' && answers.tableInStore !== 'yes' && answers.tableDeliveryKnown === 'yes' ? dateOnly(answers.tableDelivery) : '';
+    out.openingDate = answers.storeType !== 'trading' && answers.openingDateKnown === 'yes' ? dateOnly(answers.openingDate) : '';
+    out.goLiveDate = answers.goLiveDateKnown === 'yes' ? dateOnly(answers.goLiveDate) : '';
+    out.worksCompletionDate = answers.storeType !== 'trading' && answers.worksComplete !== 'yes' && answers.worksCompletionKnown === 'yes' ? dateOnly(answers.worksCompletionDate) : '';
+    if (!['yes', 'pending'].includes(answers.resolutionDateKnown)) throw Error('Resolution date answer required');
+    out.resolutionDateKnown = answers.resolutionDateKnown;
+    out.exceptionDue = answers.resolutionDateKnown === 'yes' ? dateOnly(answers.exceptionDue) : '';
+    out.evidenceCategories = Array.isArray(answers.evidenceCategories) ? [...new Set(answers.evidenceCategories.filter(x => ['table', 'powerData', 'peds', 'kit'].includes(x)))] : [];
+    out.evidenceStatus = {}; out.evidenceReasons = {};
+    for (const category of requiredEvidence(out, installType)) {
+      const state = answers.evidenceStatus?.[category];
+      if (!['provided', 'pending'].includes(state)) throw Error('Answer every evidence question');
+      if (state === 'provided' && !out.evidenceCategories.includes(category)) throw Error('Photo attachment required');
+      const reason = String(answers.evidenceReasons?.[category] || '').trim();
+      if (reason.length > 500 || (state === 'pending' && !reason)) throw Error('Missing evidence requires an explanation');
+      out.evidenceStatus[category] = state;
+      out.evidenceReasons[category] = state === 'pending' ? reason : '';
+    }
+    if (readinessGaps(out, installType, binding).length && (!out.exceptionDetails || !out.exceptionOwner || !['yes', 'pending'].includes(answers.resolutionDateKnown))) throw Error('Outstanding work requires details, owner and a resolution date or unknown-date answer');
+  }
   return out;
 }
-export function blockers(answers, installType) {
+export function requiredReadinessChecks(a, type) {
+  return ['installDateConfirmed', 'kitDelivered', 'permits', 'accessConfirmed', 'networkOnline', 'networkPrepared', 'handoverAvailable', 'goLiveDateKnown',
+    ...(type === 'sfk' ? ['tableInStore', ...(a.tableInStore === 'yes' ? ['tableAssembled'] : ['tableDeliveryKnown'])] : []),
+    ...(a.powerData === 'yes' ? ['powerTested'] : []),
+    ...(a.peds === 'yes' ? ['pedQuantityConfirmed'] : []),
+    ...(a.kitDelivered === 'yes' ? ['kitComplete', 'kitUndamaged', 'kitSecure'] : []),
+    ...(a.storeType !== 'trading' ? ['openingDateKnown', 'openingDateConfirmed', 'worksComplete', ...(a.worksComplete !== 'yes' ? ['worksCompletionKnown'] : [])] : [])];
+}
+export function readinessGaps(a, type, binding = {}) {
+  const labels = { team: 'Store team prepared', area: 'Installation area', powerData: 'Power and data installed', peds: 'PEDs received', floorplan: 'Floorplan confirmation', table: 'SFK table ordered', installDateConfirmed: 'Installation date confirmation', tableInStore: 'SFK table in store', tableAssembled: 'SFK table assembled and positioned', tableDeliveryKnown: 'Table delivery date unknown', worksCompletionKnown: 'Building works completion date unknown', powerTested: 'Power and data tested', pedQuantityConfirmed: 'Correct PED quantity', kitDelivered: 'Kit delivered', kitComplete: 'Kit complete', kitUndamaged: 'Kit undamaged', kitSecure: 'Kit securely stored', permits: 'Access permits', accessConfirmed: 'Access arrangements', networkOnline: 'Internet connection', networkPrepared: 'Network preparation', handoverAvailable: 'Contact available for handover', openingDateKnown: 'Opening/reopening date unknown', openingDateConfirmed: 'Opening/reopening date confirmation', worksComplete: 'Building works complete', goLiveDateKnown: 'Required go-live date unknown' };
+  const fields = ['team', 'area', 'powerData', 'peds', 'floorplan', ...(type === 'sfk' ? ['table'] : []), ...requiredReadinessChecks(a, type)];
+  const gaps = fields.filter(k => a[k] !== 'yes').map(k => labels[k]);
+  if (binding.installDate) {
+    if (a.goLiveDate && a.goLiveDate < binding.installDate) gaps.push('Required go-live date precedes installation');
+    if (a.openingDate && a.openingDate < binding.installDate) gaps.push('Opening/reopening precedes installation');
+    if (type === 'sfk' && a.tableInStore !== 'yes' && a.tableDelivery && a.tableDelivery >= binding.installDate) gaps.push('Table delivery is on/after installation');
+    if (a.worksComplete !== 'yes' && a.worksCompletionDate && a.worksCompletionDate >= binding.installDate) gaps.push('Building works finish on/after installation');
+    if (a.exceptionDue && a.exceptionDue >= binding.installDate) gaps.push('Resolution is on/after installation');
+  }
+  for (const [check, category, label] of [['powerData', 'powerData', 'Power/data photo'], ['peds', 'peds', 'PED photo'], ...(type === 'sfk' ? [['tableInStore', 'table', 'Table/area photo']] : [])]) {
+    if (a[check] === 'yes' && !(a.evidenceCategories || []).includes(category)) gaps.push(label + ' outstanding');
+  }
+  return [...new Set(gaps)];
+}
+export function blockers(answers, installType, binding = {}) {
   if (!answers) return ['Readiness response outstanding'];
+  if (answers.schemaVersion === 2) return readinessGaps(answers, installType, binding);
   const labels = { team: 'Team preparation', area: 'Installation area', powerData: 'Power and data', peds: 'PEDs received', floorplan: 'Floorplan confirmation', table: 'SFK table' };
   return Object.entries(labels).filter(([key]) => (key !== 'table' || installType === 'sfk') && answers[key] !== 'yes').map(([, label]) => label);
+}
+export function vmReadiness(record) {
+  const gaps = blockers(record.answers, record.binding.installType, record.binding);
+  if (!record.submitted) return { label: 'Awaiting FZE response', ready: false };
+  if (record.answers?.schemaVersion !== 2) return { label: 'Legacy response — updated checks required', ready: false };
+  if (gaps.length) return { label: 'Readiness gaps', ready: false };
+  if (record.vmReview?.decision === 'approved' && record.vmReview.revision === record.revision && record.vmReview.submissionCount === (record.history || []).filter(h => h.answers).length) return { label: 'VM reviewed — ready to proceed', ready: true };
+  if (record.vmReview?.decision === 'hold') return { label: 'VM review — on hold', ready: false };
+  return { label: 'FZE says ready — VM review pending', ready: false };
 }
 export function planReminder(record, today) {
   dateOnly(today);
@@ -72,7 +143,7 @@ export function planReminder(record, today) {
 export function reschedule(record, installDate) {
   dateOnly(installDate);
   if (record.binding.installDate === installDate) return record;
-  return { ...record, revision: record.revision + 1, binding: { ...record.binding, installDate }, sent: {}, submitted: false, answers: null, history: [...(record.history || []), { type: 'rescheduled', previousDate: record.binding.installDate, previousRevision: record.revision, previousAnswers: record.answers || null }] };
+  return { ...record, revision: record.revision + 1, binding: { ...record.binding, installDate }, sent: {}, submitted: false, answers: null, vmReview: null, history: [...(record.history || []), { type: 'rescheduled', previousDate: record.binding.installDate, previousRevision: record.revision, previousAnswers: record.answers || null }] };
 }
 export function snapshotChanges(before, rows) {
   const previous = new Map((before || []).map(x => [x.id, x]));
@@ -80,7 +151,7 @@ export function snapshotChanges(before, rows) {
   rows.forEach(row => {
     const old = previous.get(row.id);
     if (!old) changes.push({ store: row.store, change: 'Added to call view' });
-    else ['installDate', 'outcome', 'readiness', 'pedForm', 'pedOrder', 'shipping'].forEach(key => { if (JSON.stringify(old[key]) !== JSON.stringify(row[key])) changes.push({ store: row.store, change: `${key}: ${old[key] || '—'} → ${row[key] || '—'}` }); });
+    else ['installDate', 'outcome', 'readiness', 'pedForm', 'pedOrder', 'shipping', 'openingDate', 'goLiveDate', 'tableState', 'vmDecision'].forEach(key => { if (JSON.stringify(old[key]) !== JSON.stringify(row[key])) changes.push({ store: row.store, change: `${key}: ${old[key] || '—'} → ${row[key] || '—'}` }); });
   });
   const current = new Set(rows.map(x => x.id));
   (before || []).filter(x => !current.has(x.id)).forEach(x => changes.push({ store: x.store, change: 'Removed from call view' }));
@@ -97,3 +168,5 @@ export function installOutcome(phase) {
   if (/complete|installed|hypercare|^live/.test(v)) return 'Live';
   return 'Booked';
 }
+
+export function requiredEvidence(a, type) { return [...(type === 'sfk' && a.tableInStore === 'yes' ? ['table'] : []), ...(a.powerData === 'yes' ? ['powerData'] : []), ...(a.peds === 'yes' ? ['peds'] : []), ...(a.kitDelivered === 'yes' && (a.kitComplete !== 'yes' || a.kitUndamaged !== 'yes') ? ['kit'] : [])]; }

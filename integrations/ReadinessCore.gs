@@ -31,7 +31,7 @@ function validateBinding(b) {
   if (expected !== b.boardId) throw Error('Country and install board do not match');
   return b;
 }
-function validateAnswers(answers, installType) {
+function validateAnswers(answers, installType, binding = {}) {
   if (!answers || typeof answers !== 'object' || Array.isArray(answers)) throw Error('Answers required');
   const fields = ['team', 'area', 'powerData', 'peds', 'floorplan'];
   const out = {};
@@ -47,12 +47,83 @@ function validateAnswers(answers, installType) {
     out[key] = answers[key].trim();
   }
   if (!out.name) throw Error('Contact name required');
+  if (answers.schemaVersion === 2) {
+    out.schemaVersion = 2;
+    if (answers.acknowledgementAccepted !== true) throw Error('Acknowledgement required');
+    out.acknowledgementAccepted = true;
+    out.acknowledgementVersion = 'readiness-ack-v1';
+    if (!out.comments) throw Error('Comments require an answer; use None if not applicable');
+    if (!['trading', 'new', 'remodel'].includes(answers.storeType)) throw Error('Store type required');
+    out.storeType = answers.storeType;
+    for (const key of requiredReadinessChecks(answers, installType)) {
+      if (!['yes', 'no', 'pending'].includes(answers[key])) throw Error('Answer every applicable readiness question');
+      out[key] = answers[key];
+    }
+    for (const key of ['siteContact', 'contactPhone', 'accessHours', 'accessInstructions', 'exceptionDetails', 'exceptionOwner']) {
+      if (typeof answers[key] !== 'string' || answers[key].length > (['exceptionDetails', 'accessInstructions'].includes(key) ? 2000 : 150)) throw Error('Invalid contact or action details');
+      out[key] = answers[key].trim();
+    }
+    if (!out.siteContact || !out.contactPhone || !out.accessHours || !out.accessInstructions || !out.exceptionDetails || !out.exceptionOwner) throw Error('Site contact, phone and access hours required');
+    out.tableDelivery = installType === 'sfk' && answers.tableInStore !== 'yes' && answers.tableDeliveryKnown === 'yes' ? dateOnly(answers.tableDelivery) : '';
+    out.openingDate = answers.storeType !== 'trading' && answers.openingDateKnown === 'yes' ? dateOnly(answers.openingDate) : '';
+    out.goLiveDate = answers.goLiveDateKnown === 'yes' ? dateOnly(answers.goLiveDate) : '';
+    out.worksCompletionDate = answers.storeType !== 'trading' && answers.worksComplete !== 'yes' && answers.worksCompletionKnown === 'yes' ? dateOnly(answers.worksCompletionDate) : '';
+    if (!['yes', 'pending'].includes(answers.resolutionDateKnown)) throw Error('Resolution date answer required');
+    out.resolutionDateKnown = answers.resolutionDateKnown;
+    out.exceptionDue = answers.resolutionDateKnown === 'yes' ? dateOnly(answers.exceptionDue) : '';
+    out.evidenceCategories = Array.isArray(answers.evidenceCategories) ? [...new Set(answers.evidenceCategories.filter(x => ['table', 'powerData', 'peds', 'kit'].includes(x)))] : [];
+    out.evidenceStatus = {}; out.evidenceReasons = {};
+    for (const category of requiredEvidence(out, installType)) {
+      const state = answers.evidenceStatus?.[category];
+      if (!['provided', 'pending'].includes(state)) throw Error('Answer every evidence question');
+      if (state === 'provided' && !out.evidenceCategories.includes(category)) throw Error('Photo attachment required');
+      const reason = String(answers.evidenceReasons?.[category] || '').trim();
+      if (reason.length > 500 || (state === 'pending' && !reason)) throw Error('Missing evidence requires an explanation');
+      out.evidenceStatus[category] = state;
+      out.evidenceReasons[category] = state === 'pending' ? reason : '';
+    }
+    if (readinessGaps(out, installType, binding).length && (!out.exceptionDetails || !out.exceptionOwner || !['yes', 'pending'].includes(answers.resolutionDateKnown))) throw Error('Outstanding work requires details, owner and a resolution date or unknown-date answer');
+  }
   return out;
 }
-function blockers(answers, installType) {
+function requiredReadinessChecks(a, type) {
+  return ['installDateConfirmed', 'kitDelivered', 'permits', 'accessConfirmed', 'networkOnline', 'networkPrepared', 'handoverAvailable', 'goLiveDateKnown',
+    ...(type === 'sfk' ? ['tableInStore', ...(a.tableInStore === 'yes' ? ['tableAssembled'] : ['tableDeliveryKnown'])] : []),
+    ...(a.powerData === 'yes' ? ['powerTested'] : []),
+    ...(a.peds === 'yes' ? ['pedQuantityConfirmed'] : []),
+    ...(a.kitDelivered === 'yes' ? ['kitComplete', 'kitUndamaged', 'kitSecure'] : []),
+    ...(a.storeType !== 'trading' ? ['openingDateKnown', 'openingDateConfirmed', 'worksComplete', ...(a.worksComplete !== 'yes' ? ['worksCompletionKnown'] : [])] : [])];
+}
+function readinessGaps(a, type, binding = {}) {
+  const labels = { team: 'Store team prepared', area: 'Installation area', powerData: 'Power and data installed', peds: 'PEDs received', floorplan: 'Floorplan confirmation', table: 'SFK table ordered', installDateConfirmed: 'Installation date confirmation', tableInStore: 'SFK table in store', tableAssembled: 'SFK table assembled and positioned', tableDeliveryKnown: 'Table delivery date unknown', worksCompletionKnown: 'Building works completion date unknown', powerTested: 'Power and data tested', pedQuantityConfirmed: 'Correct PED quantity', kitDelivered: 'Kit delivered', kitComplete: 'Kit complete', kitUndamaged: 'Kit undamaged', kitSecure: 'Kit securely stored', permits: 'Access permits', accessConfirmed: 'Access arrangements', networkOnline: 'Internet connection', networkPrepared: 'Network preparation', handoverAvailable: 'Contact available for handover', openingDateKnown: 'Opening/reopening date unknown', openingDateConfirmed: 'Opening/reopening date confirmation', worksComplete: 'Building works complete', goLiveDateKnown: 'Required go-live date unknown' };
+  const fields = ['team', 'area', 'powerData', 'peds', 'floorplan', ...(type === 'sfk' ? ['table'] : []), ...requiredReadinessChecks(a, type)];
+  const gaps = fields.filter(k => a[k] !== 'yes').map(k => labels[k]);
+  if (binding.installDate) {
+    if (a.goLiveDate && a.goLiveDate < binding.installDate) gaps.push('Required go-live date precedes installation');
+    if (a.openingDate && a.openingDate < binding.installDate) gaps.push('Opening/reopening precedes installation');
+    if (type === 'sfk' && a.tableInStore !== 'yes' && a.tableDelivery && a.tableDelivery >= binding.installDate) gaps.push('Table delivery is on/after installation');
+    if (a.worksComplete !== 'yes' && a.worksCompletionDate && a.worksCompletionDate >= binding.installDate) gaps.push('Building works finish on/after installation');
+    if (a.exceptionDue && a.exceptionDue >= binding.installDate) gaps.push('Resolution is on/after installation');
+  }
+  for (const [check, category, label] of [['powerData', 'powerData', 'Power/data photo'], ['peds', 'peds', 'PED photo'], ...(type === 'sfk' ? [['tableInStore', 'table', 'Table/area photo']] : [])]) {
+    if (a[check] === 'yes' && !(a.evidenceCategories || []).includes(category)) gaps.push(label + ' outstanding');
+  }
+  return [...new Set(gaps)];
+}
+function blockers(answers, installType, binding = {}) {
   if (!answers) return ['Readiness response outstanding'];
+  if (answers.schemaVersion === 2) return readinessGaps(answers, installType, binding);
   const labels = { team: 'Team preparation', area: 'Installation area', powerData: 'Power and data', peds: 'PEDs received', floorplan: 'Floorplan confirmation', table: 'SFK table' };
   return Object.entries(labels).filter(([key]) => (key !== 'table' || installType === 'sfk') && answers[key] !== 'yes').map(([, label]) => label);
+}
+function vmReadiness(record) {
+  const gaps = blockers(record.answers, record.binding.installType, record.binding);
+  if (!record.submitted) return { label: 'Awaiting FZE response', ready: false };
+  if (record.answers?.schemaVersion !== 2) return { label: 'Legacy response — updated checks required', ready: false };
+  if (gaps.length) return { label: 'Readiness gaps', ready: false };
+  if (record.vmReview?.decision === 'approved' && record.vmReview.revision === record.revision && record.vmReview.submissionCount === (record.history || []).filter(h => h.answers).length) return { label: 'VM reviewed — ready to proceed', ready: true };
+  if (record.vmReview?.decision === 'hold') return { label: 'VM review — on hold', ready: false };
+  return { label: 'FZE says ready — VM review pending', ready: false };
 }
 function planReminder(record, today) {
   dateOnly(today);
@@ -74,7 +145,7 @@ function planReminder(record, today) {
 function reschedule(record, installDate) {
   dateOnly(installDate);
   if (record.binding.installDate === installDate) return record;
-  return { ...record, revision: record.revision + 1, binding: { ...record.binding, installDate }, sent: {}, submitted: false, answers: null, history: [...(record.history || []), { type: 'rescheduled', previousDate: record.binding.installDate, previousRevision: record.revision, previousAnswers: record.answers || null }] };
+  return { ...record, revision: record.revision + 1, binding: { ...record.binding, installDate }, sent: {}, submitted: false, answers: null, vmReview: null, history: [...(record.history || []), { type: 'rescheduled', previousDate: record.binding.installDate, previousRevision: record.revision, previousAnswers: record.answers || null }] };
 }
 function snapshotChanges(before, rows) {
   const previous = new Map((before || []).map(x => [x.id, x]));
@@ -82,7 +153,7 @@ function snapshotChanges(before, rows) {
   rows.forEach(row => {
     const old = previous.get(row.id);
     if (!old) changes.push({ store: row.store, change: 'Added to call view' });
-    else ['installDate', 'outcome', 'readiness', 'pedForm', 'pedOrder', 'shipping'].forEach(key => { if (JSON.stringify(old[key]) !== JSON.stringify(row[key])) changes.push({ store: row.store, change: `${key}: ${old[key] || '—'} → ${row[key] || '—'}` }); });
+    else ['installDate', 'outcome', 'readiness', 'pedForm', 'pedOrder', 'shipping', 'openingDate', 'goLiveDate', 'tableState', 'vmDecision'].forEach(key => { if (JSON.stringify(old[key]) !== JSON.stringify(row[key])) changes.push({ store: row.store, change: `${key}: ${old[key] || '—'} → ${row[key] || '—'}` }); });
   });
   const current = new Set(rows.map(x => x.id));
   (before || []).filter(x => !current.has(x.id)).forEach(x => changes.push({ store: x.store, change: 'Removed from call view' }));
@@ -99,6 +170,45 @@ function installOutcome(phase) {
   if (/complete|installed|hypercare|^live/.test(v)) return 'Live';
   return 'Booked';
 }
+
+function requiredEvidence(a, type) { return [...(type === 'sfk' && a.tableInStore === 'yes' ? ['table'] : []), ...(a.powerData === 'yes' ? ['powerData'] : []), ...(a.peds === 'yes' ? ['peds'] : []), ...(a.kitDelivered === 'yes' && (a.kitComplete !== 'yes' || a.kitUndamaged !== 'yes') ? ['kit'] : [])]; }
+
+// Country-native readiness questions. No service commitment beyond installation and handover.
+const EXTRA_COPY = {
+ en: {
+  tableDeliveryKnown:'Is the table delivery date confirmed?', worksCompletionKnown:'Is the building works completion date known?', acknowledgementLabel:'Read and acknowledge before submitting', acknowledgement:'I confirm that I have read the installation guides applicable to this restaurant and installation type, and that the answers supplied are accurate to the best of my knowledge. I understand that if the required preparations, equipment or access are not in place on the installation day, the installation may be delayed or aborted. Revisit charges and charges for corrective work may apply in accordance with our agreed terms. I will inform the installation team if any answer or date changes.', provided:'Photo attached', unavailable:'Photo not available yet', evidenceReason:'Why is this photo unavailable, and when can it be supplied?', requiredHint:'Every applicable question is required. Enter “None” where there is nothing to add; choose an explicit unknown/not-yet answer where needed.', acknowledgementRequired:'Read the applicable guides and tick the acknowledgement to submit.',
+  datesSection:'Restaurant dates', equipmentSection:'Table, terminals and kit', siteSection:'Building, network and access', actionSection:'Outstanding work', evidenceSection:'Photo evidence',
+  storeType:'Which situation applies to this restaurant?', trading:'Existing trading restaurant', new:'New restaurant opening', remodel:'Remodel / reopening', installDateConfirmed:'Is the installation date shown above correct?',
+  openingDateKnown:'Is the opening/reopening date known?', openingDate:'Planned opening/reopening date', openingDateConfirmed:'Is the opening/reopening date confirmed and still correct?', goLiveDateKnown:'Is the required trading / go-live date known?', goLiveDate:'Date the system must be working', sourceOpening:'Opening/reopening date currently recorded', dateProposal:'Dates entered here are confirmations or proposed corrections. They do not change the installation booking.',
+  tableInStore:'Is the SFK table physically in the restaurant?', tableAssembled:'Is the table assembled and positioned for installation?', tableDelivery:'Expected table delivery date (if not yet in store)',
+  powerTested:'Have the installed power and data connections been tested?', pedQuantityConfirmed:'Have you received the correct quantity of payment terminals?', kitDelivered:'Has the installation kit arrived at the correct restaurant?', kitComplete:'Has the kit been checked and is everything present?', kitUndamaged:'Is all delivered kit free from damage?', kitSecure:'Is the kit securely stored and available for the installer?',
+  worksComplete:'Are building works and other trades complete in the installation area?', worksCompletionDate:'Expected building works completion date (if known)', permits:'Are landlord permissions and any required access permits in place?', accessConfirmed:'Are access, keys and permitted installation hours arranged?', networkOnline:'Is the restaurant internet connection working?', networkPrepared:'Has the required network preparation been completed?', handoverAvailable:'Will the manager or nominated contact be available for installation and handover?',
+  siteContact:'Installation / handover contact name', contactPhone:'Contact mobile number', accessHours:'Installer access hours', accessInstructions:'Keys, permits and access instructions', exceptionDetails:'What is outstanding and what needs to happen?', exceptionOwner:'Who is responsible for resolving it?', resolutionDateKnown:'Is the resolution date known?', exceptionDue:'Expected resolution date', actionsHelp:'If anything is not ready, identify the issue, owner and expected resolution. Choose “Not yet” if the date is unknown.',
+  tablePhoto:'Table and installation area', powerPhoto:'Power and data', pedsPhoto:'Payment terminals', kitPhoto:'Kit / missing or damaged items', photoHint:'One JPEG or PNG per category, maximum 700 KB each. Required evidence remains a visible gap until supplied.', photosError:'Use a JPEG/PNG photo of 700 KB or less.', saveError:'Please check the required answers, contact details and outstanding-work details.', reviewPending:'Your response is saved for the installation team to review. Submission is not approval to proceed.'
+ },
+ nl: {
+  tableDeliveryKnown:'Is de leverdatum van de tafel bevestigd?', worksCompletionKnown:'Is de einddatum van de bouwwerkzaamheden bekend?', acknowledgementLabel:'Lees en bevestig vóór het versturen', acknowledgement:'Ik bevestig dat ik de installatiehandleidingen heb gelezen die van toepassing zijn op dit restaurant en dit type installatie, en dat de verstrekte antwoorden naar mijn beste weten juist zijn. Ik begrijp dat de installatie kan worden uitgesteld of afgebroken als de vereiste voorbereidingen, apparatuur of toegang op de installatiedag niet in orde zijn. Kosten voor een nieuw bezoek en voor herstelwerkzaamheden kunnen in rekening worden gebracht overeenkomstig onze overeengekomen voorwaarden. Ik informeer het installatieteam als een antwoord of datum verandert.', provided:'Foto toegevoegd', unavailable:'Foto nog niet beschikbaar', evidenceReason:'Waarom is deze foto niet beschikbaar en wanneer kan deze worden aangeleverd?', requiredHint:'Elke toepasselijke vraag is verplicht. Vul “Geen” in als er niets toe te voegen is; kies een expliciet antwoord als iets onbekend of nog niet gereed is.', acknowledgementRequired:'Lees de toepasselijke handleidingen en vink de bevestiging aan om te versturen.',
+  datesSection:'Restaurantdatums', equipmentSection:'Tafel, betaalterminals en apparatuur', siteSection:'Bouwwerkzaamheden, netwerk en toegang', actionSection:'Openstaande werkzaamheden', evidenceSection:'Foto’s',
+  storeType:'Welke situatie geldt voor dit restaurant?', trading:'Bestaand geopend restaurant', new:'Opening van een nieuw restaurant', remodel:'Verbouwing / heropening', installDateConfirmed:'Is de hierboven getoonde installatiedatum correct?',
+  openingDateKnown:'Is de openings- of heropeningsdatum bekend?', openingDate:'Geplande openings- of heropeningsdatum', openingDateConfirmed:'Is de openings- of heropeningsdatum bevestigd en nog correct?', goLiveDateKnown:'Is de datum waarop het systeem moet werken bekend?', goLiveDate:'Datum waarop het systeem moet werken', sourceOpening:'Huidige geregistreerde openings- of heropeningsdatum', dateProposal:'Deze datums zijn bevestigingen of voorgestelde correcties. Ze wijzigen de installatieafspraak niet.',
+  tableInStore:'Is de SFK-tafel fysiek aanwezig in het restaurant?', tableAssembled:'Is de tafel gemonteerd en op de juiste plaats gezet?', tableDelivery:'Verwachte leverdatum van de tafel (indien nog niet aanwezig)',
+  powerTested:'Zijn de aangelegde stroom- en dataverbindingen getest?', pedQuantityConfirmed:'Heeft u het juiste aantal betaalterminals ontvangen?', kitDelivered:'Is de installatieapparatuur op het juiste restaurantadres aangekomen?', kitComplete:'Is de levering gecontroleerd en is alles aanwezig?', kitUndamaged:'Is alle geleverde apparatuur onbeschadigd?', kitSecure:'Is de apparatuur veilig opgeslagen en beschikbaar voor de installateur?',
+  worksComplete:'Zijn de bouwwerkzaamheden en andere werkzaamheden in de installatiezone afgerond?', worksCompletionDate:'Verwachte einddatum van de bouwwerkzaamheden (indien bekend)', permits:'Zijn toestemming van de verhuurder en benodigde toegangsvergunningen geregeld?', accessConfirmed:'Zijn toegang, sleutels en toegestane installatietijden geregeld?', networkOnline:'Werkt de internetverbinding van het restaurant?', networkPrepared:'Zijn de vereiste netwerkvoorbereidingen afgerond?', handoverAvailable:'Is de manager of aangewezen contactpersoon aanwezig voor de installatie en overdracht?',
+  siteContact:'Contactpersoon voor installatie en overdracht', contactPhone:'Mobiel telefoonnummer', accessHours:'Toegangstijden voor de installateur', accessInstructions:'Instructies voor sleutels, vergunningen en toegang', exceptionDetails:'Wat staat nog open en wat moet er gebeuren?', exceptionOwner:'Wie is verantwoordelijk voor het oplossen hiervan?', resolutionDateKnown:'Is de datum voor de oplossing bekend?', exceptionDue:'Verwachte datum van oplossing', actionsHelp:'Vermeld bij openstaande punten het probleem, de verantwoordelijke en de verwachte datum. Kies “Nog niet” als de datum onbekend is.',
+  tablePhoto:'Tafel en installatiezone', powerPhoto:'Stroom en data', pedsPhoto:'Betaalterminals', kitPhoto:'Apparatuur / ontbrekende of beschadigde onderdelen', photoHint:'Eén JPEG- of PNG-foto per categorie, maximaal 700 KB. Ontbrekende vereiste foto’s blijven als open punt zichtbaar.', photosError:'Gebruik een JPEG- of PNG-foto van maximaal 700 KB.', saveError:'Controleer de verplichte antwoorden, contactgegevens en openstaande punten.', reviewPending:'Uw reactie is opgeslagen ter beoordeling door het installatieteam. Het versturen is geen goedkeuring om door te gaan.'
+ },
+ de: {
+  tableDeliveryKnown:'Ist der Liefertermin des Tisches bestätigt?', worksCompletionKnown:'Ist der Abschlusstermin der Bauarbeiten bekannt?', acknowledgementLabel:'Vor dem Absenden lesen und bestätigen', acknowledgement:'Ich bestätige, dass ich die für dieses Restaurant und diesen Installationstyp geltenden Installationsanleitungen gelesen habe und dass meine Angaben nach bestem Wissen richtig sind. Ich verstehe, dass die Installation verschoben oder abgebrochen werden kann, wenn die erforderlichen Vorbereitungen, Geräte oder Zugangsmöglichkeiten am Installationstag nicht vorhanden sind. Gebühren für erneute Anfahrten und für Korrekturarbeiten können gemäß unseren vereinbarten Bedingungen anfallen. Ich informiere das Installationsteam, wenn sich eine Antwort oder ein Termin ändert.', provided:'Foto angehängt', unavailable:'Foto noch nicht verfügbar', evidenceReason:'Warum ist dieses Foto nicht verfügbar und wann kann es bereitgestellt werden?', requiredHint:'Jede zutreffende Frage ist verpflichtend. Tragen Sie „Keine“ ein, wenn nichts hinzuzufügen ist; wählen Sie eine ausdrückliche Antwort, wenn etwas unbekannt oder noch nicht bereit ist.', acknowledgementRequired:'Lesen Sie die zutreffenden Anleitungen und setzen Sie das Bestätigungshäkchen, um abzusenden.',
+  datesSection:'Restauranttermine', equipmentSection:'Tisch, Zahlungsterminals und Geräte', siteSection:'Bauarbeiten, Netzwerk und Zugang', actionSection:'Offene Arbeiten', evidenceSection:'Fotobelege',
+  storeType:'Welche Situation trifft auf dieses Restaurant zu?', trading:'Bestehendes geöffnetes Restaurant', new:'Neueröffnung', remodel:'Umbau / Wiedereröffnung', installDateConfirmed:'Ist der oben angezeigte Installationstermin korrekt?',
+  openingDateKnown:'Ist der Eröffnungs- oder Wiedereröffnungstermin bekannt?', openingDate:'Geplanter Eröffnungs- oder Wiedereröffnungstermin', openingDateConfirmed:'Ist der Eröffnungs- oder Wiedereröffnungstermin bestätigt und weiterhin korrekt?', goLiveDateKnown:'Ist der Termin bekannt, ab dem das System funktionieren muss?', goLiveDate:'Datum, ab dem das System funktionieren muss', sourceOpening:'Derzeit erfasster Eröffnungs- oder Wiedereröffnungstermin', dateProposal:'Diese Angaben sind Bestätigungen oder vorgeschlagene Korrekturen. Sie ändern den Installationstermin nicht.',
+  tableInStore:'Befindet sich der SFK-Tisch bereits im Restaurant?', tableAssembled:'Ist der Tisch aufgebaut und für die Installation positioniert?', tableDelivery:'Voraussichtlicher Liefertermin des Tisches (falls noch nicht vor Ort)',
+  powerTested:'Wurden die installierten Strom- und Datenanschlüsse getestet?', pedQuantityConfirmed:'Haben Sie die richtige Anzahl an Zahlungsterminals erhalten?', kitDelivered:'Sind die Installationsgeräte am richtigen Restaurant angekommen?', kitComplete:'Wurde die Lieferung geprüft und ist alles vorhanden?', kitUndamaged:'Sind alle gelieferten Geräte unbeschädigt?', kitSecure:'Sind die Geräte sicher gelagert und für den Installateur zugänglich?',
+  worksComplete:'Sind Bauarbeiten und andere Gewerke im Installationsbereich abgeschlossen?', worksCompletionDate:'Voraussichtlicher Abschluss der Bauarbeiten (falls bekannt)', permits:'Liegen Vermieterzustimmung und erforderliche Zugangsgenehmigungen vor?', accessConfirmed:'Sind Zugang, Schlüssel und zulässige Installationszeiten organisiert?', networkOnline:'Funktioniert der Internetanschluss des Restaurants?', networkPrepared:'Sind die erforderlichen Netzwerkvorbereitungen abgeschlossen?', handoverAvailable:'Ist der Manager oder die benannte Kontaktperson für Installation und Übergabe verfügbar?',
+  siteContact:'Kontaktperson für Installation und Übergabe', contactPhone:'Mobiltelefonnummer', accessHours:'Zugangszeiten für den Installateur', accessInstructions:'Hinweise zu Schlüsseln, Genehmigungen und Zugang', exceptionDetails:'Was ist noch offen und was muss geschehen?', exceptionOwner:'Wer ist für die Behebung verantwortlich?', resolutionDateKnown:'Ist der Termin für die Behebung bekannt?', exceptionDue:'Voraussichtlicher Termin der Behebung', actionsHelp:'Nennen Sie bei offenen Punkten das Problem, die zuständige Person und den erwarteten Termin. Wählen Sie „Noch nicht“, wenn der Termin unbekannt ist.',
+  tablePhoto:'Tisch und Installationsbereich', powerPhoto:'Strom und Daten', pedsPhoto:'Zahlungsterminals', kitPhoto:'Geräte / fehlende oder beschädigte Teile', photoHint:'Ein JPEG- oder PNG-Foto je Kategorie, maximal 700 KB. Fehlende erforderliche Fotos bleiben als offene Punkte sichtbar.', photosError:'Verwenden Sie ein JPEG- oder PNG-Foto mit maximal 700 KB.', saveError:'Prüfen Sie die Pflichtantworten, Kontaktdaten und Angaben zu offenen Arbeiten.', reviewPending:'Ihre Antwort wurde zur Prüfung durch das Installationsteam gespeichert. Die Übermittlung ist keine Freigabe zur Durchführung.'
+ }
+};
 
 const COPY = {
   en: {
@@ -120,7 +230,7 @@ const COPY = {
     mailSubject: 'Vorbereitung auf die Installation', invitation: 'Bitte bestätigen Sie, ob Ihr Restaurant für die Installation bereit ist.', chase1: 'Eine Erinnerung: Bitte füllen Sie Ihr Bereitschaftsupdate für die Installation aus.', chase2: 'Ihre Rückmeldung zur Installationsbereitschaft steht noch aus. Ihr MFP ist zur Unterstützung in Kopie.', late: 'Ihre Installation steht bevor. Bitte füllen Sie Ihr Bereitschaftsupdate so bald wie möglich aus.', mailAction: 'Bereitschaft bestätigen', mailClose: 'Falls etwas noch nicht bereit ist, teilen Sie uns dies im Formular mit, damit das Team helfen kann.', signature: 'Vita Mojo – Subway EMEA Team'
   }
 };
-function copyFor(country) { return COPY[MARKETS[market(country)]]; }
+function copyFor(country) { const lang = MARKETS[market(country)]; return { ...COPY[lang], ...EXTRA_COPY[lang] }; }
 const escape = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 function emailPreview(record, plan, url) {
   const c = copyFor(record.binding.country);
@@ -159,22 +269,22 @@ function reduce(previous, c, now) {
   r.cancelled=true;r.history.push({type:'cancelled',at});return {record:r,result:{cancelled:true}};
  }
  if (['open','beginSubmission','commitSubmission'].includes(c.operation) && (r.cancelled || r.revision!==c.revision || c.tokenHash!==r.tokenHash || !(r.expires>now))) throw Error('Expired or replaced link');
- if (c.operation==='open') return {record:r,result:{binding:r.binding,revision:r.revision,submitted:r.submitted,answers:r.answers,history:r.history.filter(h=>h.type==='submission').map(h=>({id:h.id,at:h.at,answers:h.answers,files:h.files.map(f=>({name:f.name}))}))}};
+ if (c.operation==='open') return {record:r,result:{binding:r.binding,revision:r.revision,submitted:r.submitted,answers:r.answers,vmReviewStatus:r.vmReview?.decision || 'pending',history:r.history.filter(h=>h.type==='submission').map(h=>({id:h.id,at:h.at,answers:h.answers,acknowledgement:h.acknowledgement,files:h.files.map(f=>({name:f.name}))}))}};
  if (c.operation==='beginSubmission') {
   if (!/^[a-zA-Z0-9-]{16,80}$/.test(c.submissionId || '')) throw Error('Invalid submission ID');
   const old=r.submissions[c.submissionId];
   if (old) {if(old.digest!==c.digest)throw Error('Submission ID reused');return {record:r,result:{completed:true,...old}};}
   if(r.pendingMail)throw Error('Message in flight; reconcile');
-  const answers=validateAnswers(c.answers,r.binding.installType);
+  const answers=validateAnswers(c.answers,r.binding.installType,r.binding);
   if(r.pendingSubmission){if(r.pendingSubmission.id!==c.submissionId||r.pendingSubmission.digest!==c.digest)throw Error('Submission outcome uncertain; reconcile');return {record:r,result:{pending:true,phase:r.pendingSubmission.phase}};}
-  r.pendingSubmission={id:c.submissionId,digest:c.digest,answers,at,phase:'reserved'};return {record:r,result:{reserved:true}};
+  r.pendingSubmission={id:c.submissionId,digest:c.digest,answers,at,phase:'reserved',acknowledgement:answers.schemaVersion===2?{version:answers.acknowledgementVersion,text:copyFor(r.binding.country).acknowledgement,country:r.binding.country,installType:r.binding.installType,at}:null};return {record:r,result:{reserved:true}};
  }
  if(c.operation==='commitSubmission'){
   const p=r.pendingSubmission;
   if(!p||p.id!==c.submissionId||p.digest!==c.digest||!c.archiveId||!c.mondayItemId)throw Error('Submission receipt mismatch');
   const receipt={at:p.at,digest:p.digest,archiveId:c.archiveId,mondayItemId:c.mondayItemId};
-  r.answers=p.answers;r.submitted=true;r.submissions[p.id]=receipt;r.history.push({id:p.id,type:'submission',at:p.at,answers:p.answers,files:c.files||[],archiveId:c.archiveId,mondayItemId:c.mondayItemId});r.pendingSubmission=null;
-  return {record:r,result:{at:receipt.at,blockers:blockers(r.answers,r.binding.installType)}};
+  r.answers=p.answers;r.submitted=true;r.vmReview=null;r.submissions[p.id]=receipt;r.history.push({id:p.id,type:'submission',at:p.at,answers:p.answers,acknowledgement:p.acknowledgement,files:c.files||[],archiveId:c.archiveId,mondayItemId:c.mondayItemId});r.pendingSubmission=null;
+  return {record:r,result:{at:receipt.at,blockers:blockers(r.answers,r.binding.installType,r.binding)}};
  }
  if(c.operation==='plan')return {record:r,result:r.pendingMail||r.pendingSubmission?{state:'blocked',reason:'Pending operation requires reconciliation'}:planReminder(r,c.today)};
  if(c.operation==='reserveMail'){
@@ -184,6 +294,11 @@ function reduce(previous, c, now) {
  if(c.operation==='confirmSent'){
   if(!r.pendingMail||r.pendingMail.key!==c.key||!c.sentMessageId||c.receiptVerified!==true)throw Error('Verified Sent receipt required');
   r.sent[r.pendingMail.stage]={date:dateOnly(c.today),messageId:c.sentMessageId};r.history.push({type:'sent',at,key:c.key,to:r.pendingMail.to,cc:r.pendingMail.cc,messageId:c.sentMessageId});r.pendingMail=null;return {record:r,result:{confirmed:true}};
+ }
+ if(c.operation==='review'){
+  if(!['pending','hold','approved'].includes(c.decision)||!c.reviewer?.trim())throw Error('Reviewer and decision required');
+  if(c.decision==='approved'&&(!r.submitted||r.answers?.schemaVersion!==2||blockers(r.answers,r.binding.installType,r.binding).length))throw Error('Cannot approve incomplete readiness');
+  r.vmReview={decision:c.decision,reviewer:c.reviewer.trim(),at,revision:r.revision,submissionCount:r.history.filter(h=>h.answers).length};r.history.push({type:'vm-review',...r.vmReview});return {record:r,result:r.vmReview};
  }
  if(c.operation==='note'){
   if(!['internal','shared'].includes(c.visibility)||!c.author?.trim()||!c.text?.trim()||c.text.length>3000)throw Error('Invalid note');

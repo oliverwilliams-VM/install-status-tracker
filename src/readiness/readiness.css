@@ -5,3 +5,6 @@
 
 /* Full VM design tokens must come from the approved VM designer; no palette is claimed as approved here. */
 .rd-filters{flex-wrap:wrap}.rd-metric.metric-4{border-top:3px solid #6b54a3;background:#f3effa}.rd-brand img{object-fit:contain}
+.rd-question-section{display:flex;flex-direction:column;gap:22px;padding-top:20px;border-top:2px solid #d5e0dc}.rd-question-section h2,.rd-acknowledgement h2{font-size:19px;line-height:1.4;letter-spacing:-.4px;margin:0}.rd-required-note{padding:14px;background:#e8f3fa;border-left:3px solid #006eaa;color:#16465c;font-size:12px;line-height:1.6}.rd-acknowledgement{padding:23px;background:#fff5d4;border:2px solid #b58b12;border-radius:9px;display:flex;flex-direction:column;gap:18px}.rd-acknowledgement>label{flex-direction:row!important;align-items:flex-start;font-size:12px;font-weight:400;line-height:1.85}.rd-acknowledgement input{margin-top:6px;accent-color:#005a86;width:19px;height:19px;flex-shrink:0}.rd-acknowledgement .rd-guides{margin:0;padding:10px 0}.rd-vm-review{border-top:1px solid #d5ded9;padding-top:20px;display:flex;flex-direction:column;gap:16px}
+
+.rd-table .rd-badge{white-space:normal;max-width:230px;line-height:1.5}.rd-portal details p{font-size:12px;line-height:1.7}
