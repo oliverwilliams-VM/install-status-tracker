@@ -145,7 +145,7 @@ export function classifyInstallOutcome(installPhase) {
   const v = (installPhase || '').trim().toLowerCase();
   if (!v) return 'pending';
   if (
-    v.includes('cancel') || v.includes('deinstall') || v.includes('deiinstall') ||
+    v.includes('abort') || v.includes('partial') || v.includes('cancel') || v.includes('deinstall') || v.includes('deiinstall') ||
     v.includes('revisit') || v === 'stuck' || v.includes('not live') || v.includes('postponed')
   ) {
     return 'issue';

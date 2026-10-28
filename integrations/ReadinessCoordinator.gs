@@ -108,5 +108,5 @@ function RD_assertCurrent_(record,p){
  var cols={};i.column_values.forEach(function(v){cols[v.id]=v;});
  var dateCol={UK:'date',IE:'date1__1',NL:'date',DE:'date3'}[market(b.country)],phaseCol=market(b.country)==='IE'?'status__1':'status';
  var date=JSON.parse((cols[dateCol]||{}).value||'null'),phase=(cols[phaseCol]||{}).text||'';
- if(!date||date.date!==b.installDate||/cancel|postpon|on.?hold|abort|complete|hypercare|installed|live/i.test(phase))throw Error('Installation changed or no longer pending; reconcile invitation');
+ if(!date||date.date!==b.installDate||/cancel|postpon|on.?hold|abort|partial|revisit|complete|hypercare|installed|live/i.test(phase))throw Error('Installation changed or no longer pending; reconcile invitation');
 }

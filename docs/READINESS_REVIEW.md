@@ -10,7 +10,7 @@ Open `/?view=readiness-review` on the branch preview. It is isolated from the ex
 2. Open **Franchisee portal**. Choose UK/IE for English, NL for Dutch or DE for German.
 3. Submit a fictional response with one No answer. It is recorded, the reminder planner stops, and the gap remains in the call view.
 4. Return to the burndown room and inspect **Since the last call**.
-5. Open a restaurant to review SFK table status, PED return/order stages, kit tracking, action owner/due date and VM notes. Internal notes are hidden by default; shared notes appear in the call table. This is a presentation filter, not an authorization boundary.
+5. Open a restaurant to review SFK table status, PED return/order stages, kit tracking, action owner/due date and the read-only VM notes area. The local note-entry form has been removed; the production source must be a verified Monday Updates feed or dedicated VM notes column. No such source is connected in the review. This is a presentation filter, not an authorization boundary.
 6. Open **Emails & timing**, select each language and the final chaser. Verify FZE To, MFP CC, subject, body, plain text and dates.
 7. Download review JSON if wanted. Reset only clears the fictional review state in that browser.
 
@@ -72,4 +72,12 @@ For an issue: unset `RD_SEND_APPROVED`, `READINESS_BACKEND_ENABLED` and `RD_WRIT
 
 ## Validation status
 
-22 automated tests passed, including simulated end-to-end Drive/Monday filing and failure-after-item-creation duplicate prevention. Production build passed. Browser checks: English submission with No creates a visible blocker; call snapshot records the readiness change; Dutch SFK and German non-SFK pages select the correct questions/language; historic FZE comment remains visible. These checks do not certify live Google/Monday/Gmail setup.
+23 automated tests passed, including simulated end-to-end Drive/Monday filing and failure-after-item-creation duplicate prevention. Production build passed. Browser checks: English submission with No creates a visible blocker; call snapshot records the readiness change; Dutch SFK and German non-SFK pages select the correct questions/language; historic FZE comment remains visible. These checks do not certify live Google/Monday/Gmail setup.
+
+## Oliver feedback — 28 October
+
+Live, Partially completed and Aborted installations are retained as explicit outcomes with an All outcomes filter and a partial/aborted count. Do not remove these items just because preparation is complete or the attempt failed. Installed - Not Live and Install Revisit Needed map to Partially completed before any success matching. Reminder chasing stops for attempted/completed/aborted outcomes; operational follow-up stays visible. Native labels must be preserved alongside the normalized outcome during production wiring.
+
+VM notes are no longer editable in the review. There is no existing dedicated VM notes column on the four Install→BAU boards inspected. The Brain has Apex Comments / Exception (`long_text_mm7fs00x`), which must NOT be silently relabelled VM notes. Use either the exact installation item's Monday Updates thread (with an explicit shared visibility convention) or a new dedicated VM notes column after source choice. Keep FZE comments independent.
+
+Branding: supplied Subway and VM logo assets retained without CSS recolouring. The approved VM designer exists in Claude; its palette/fonts/tokens are NOT in the current repository or handover. Full brand approval is therefore pending that source; the review's current palette is not asserted to be official VM branding.

@@ -54,7 +54,7 @@ export function blockers(answers, installType) {
 }
 export function planReminder(record, today) {
   dateOnly(today);
-  if (record.cancelled || record.completed || ['Live', 'Postponed'].includes(record.outcome) || record.submitted || today >= record.binding.installDate) return { state: 'stopped', reason: record.submitted ? 'Response received; follow up blockers separately' : 'No outstanding future install' };
+  if (record.cancelled || record.completed || ['Live', 'Postponed', 'Partially completed', 'Aborted'].includes(record.outcome) || record.submitted || today >= record.binding.installDate) return { state: 'stopped', reason: record.submitted ? 'Response received; follow up blockers separately' : 'No outstanding future install' };
   const due = milestones(record.binding.installDate).filter(x => x.date <= today);
   if (!due.length) return { state: 'waiting', next: milestones(record.binding.installDate)[0].date };
   const sent = record.sent || {};
@@ -85,4 +85,15 @@ export function snapshotChanges(before, rows) {
   const current = new Set(rows.map(x => x.id));
   (before || []).filter(x => !current.has(x.id)).forEach(x => changes.push({ store: x.store, change: 'Removed from call view' }));
   return changes;
+}
+
+// Evaluate exception states before success: "Installed - Not Live" is not live.
+export function installOutcome(phase) {
+  const v = String(phase || '').trim().toLowerCase();
+  if (/abort|cancel/.test(v)) return 'Aborted';
+  if (/partial|not[ -]*live|revisit/.test(v)) return 'Partially completed';
+  if (/postpon/.test(v)) return 'Postponed';
+  if (/stuck|block/.test(v)) return 'Blocked';
+  if (/complete|installed|hypercare|^live/.test(v)) return 'Live';
+  return 'Booked';
 }
