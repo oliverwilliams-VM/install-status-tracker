@@ -47,6 +47,19 @@ export function validateAnswers(answers, installType, binding = {}) {
   if (!out.name) throw Error('Contact name required');
   if (answers.schemaVersion === 2) {
     out.schemaVersion = 2;
+    out.tableOrderDate = '';
+    out.tableDeliveryStatus = '';
+    if (installType === 'sfk') {
+      if (!['yes','no'].includes(answers.table) || !['yes','no'].includes(answers.tableInStore)) throw Error('Table ordered and delivered require Yes or No');
+      if (answers.table === 'yes') {
+        out.tableOrderDate = dateOnly(answers.tableOrderDate);
+        if (out.tableOrderDate > londonToday()) throw Error('Order date cannot be in the future');
+      }
+      if (answers.tableInStore === 'no') {
+        if (!['confirmed','eta','unknown'].includes(answers.tableDeliveryStatus)) throw Error('Delivery date or ETA status required');
+        out.tableDeliveryStatus = answers.tableDeliveryStatus;
+      }
+    }
     if (answers.acknowledgementAccepted !== true) throw Error('Acknowledgement required');
     out.acknowledgementAccepted = true;
     out.acknowledgementVersion = 'readiness-ack-v1';
@@ -62,7 +75,8 @@ export function validateAnswers(answers, installType, binding = {}) {
       out[key] = answers[key].trim();
     }
     if (!out.siteContact || !out.contactPhone || !out.accessHours || !out.accessInstructions || !out.exceptionDetails || !out.exceptionOwner) throw Error('Site contact, phone and access hours required');
-    out.tableDelivery = installType === 'sfk' && answers.tableInStore !== 'yes' && answers.tableDeliveryKnown === 'yes' ? dateOnly(answers.tableDelivery) : '';
+    out.tableDelivery = installType === 'sfk' && answers.tableInStore !== 'yes' && ['confirmed','eta'].includes(answers.tableDeliveryStatus) ? dateOnly(answers.tableDelivery) : '';
+    if (installType === 'sfk' && answers.tableInStore === 'no') out.tableDeliveryKnown = answers.tableDeliveryStatus === 'unknown' ? 'pending' : 'yes';
     out.openingDate = answers.storeType !== 'trading' && answers.openingDateKnown === 'yes' ? dateOnly(answers.openingDate) : '';
     out.goLiveDate = answers.goLiveDateKnown === 'yes' ? dateOnly(answers.goLiveDate) : '';
     out.worksCompletionDate = answers.storeType !== 'trading' && answers.worksComplete !== 'yes' && answers.worksCompletionKnown === 'yes' ? dateOnly(answers.worksCompletionDate) : '';
@@ -86,7 +100,7 @@ export function validateAnswers(answers, installType, binding = {}) {
 }
 export function requiredReadinessChecks(a, type) {
   return ['installDateConfirmed', 'kitDelivered', 'permits', 'accessConfirmed', 'networkOnline', 'networkPrepared', 'handoverAvailable', 'goLiveDateKnown',
-    ...(type === 'sfk' ? ['tableInStore', ...(a.tableInStore === 'yes' ? ['tableAssembled'] : ['tableDeliveryKnown'])] : []),
+    ...(type === 'sfk' ? ['tableInStore', ...(a.tableInStore === 'yes' ? ['tableAssembled'] : [])] : []),
     ...(a.powerData === 'yes' ? ['powerTested'] : []),
     ...(a.peds === 'yes' ? ['pedQuantityConfirmed'] : []),
     ...(a.kitDelivered === 'yes' ? ['kitComplete', 'kitUndamaged', 'kitSecure'] : []),
@@ -96,6 +110,8 @@ export function readinessGaps(a, type, binding = {}) {
   const labels = { team: 'Store team prepared', area: 'Installation area', powerData: 'Power and data installed', peds: 'PEDs received', floorplan: 'Floorplan confirmation', table: 'SFK table ordered', installDateConfirmed: 'Installation date confirmation', tableInStore: 'SFK table in store', tableAssembled: 'SFK table assembled and positioned', tableDeliveryKnown: 'Table delivery date unknown', worksCompletionKnown: 'Building works completion date unknown', powerTested: 'Power and data tested', pedQuantityConfirmed: 'Correct PED quantity', kitDelivered: 'Kit delivered', kitComplete: 'Kit complete', kitUndamaged: 'Kit undamaged', kitSecure: 'Kit securely stored', permits: 'Access permits', accessConfirmed: 'Access arrangements', networkOnline: 'Internet connection', networkPrepared: 'Network preparation', handoverAvailable: 'Contact available for handover', openingDateKnown: 'Opening/reopening date unknown', openingDateConfirmed: 'Opening/reopening date confirmation', worksComplete: 'Building works complete', goLiveDateKnown: 'Required go-live date unknown' };
   const fields = ['team', 'area', 'powerData', 'peds', 'floorplan', ...(type === 'sfk' ? ['table'] : []), ...requiredReadinessChecks(a, type)];
   const gaps = fields.filter(k => a[k] !== 'yes').map(k => labels[k]);
+  if (type === 'sfk' && a.tableInStore === 'no' && a.tableDeliveryStatus === 'unknown') gaps.push('Table delivery date unknown');
+  if (type === 'sfk' && a.tableOrderDate && a.tableDelivery && a.tableDelivery < a.tableOrderDate) gaps.push('Table delivery date precedes order date');
   if (binding.installDate) {
     if (a.goLiveDate && a.goLiveDate < binding.installDate) gaps.push('Required go-live date precedes installation');
     if (a.openingDate && a.openingDate < binding.installDate) gaps.push('Opening/reopening precedes installation');
