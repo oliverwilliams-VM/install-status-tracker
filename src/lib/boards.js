@@ -110,7 +110,7 @@ export const COUNTRY_BOARDS = [
 // uses the identical column IDs below \u2014 only the on-screen label text
 // (and the Yes/No wording: Yes/Ja/Jaa vs No/Nein/Nee) differs.
 export const READINESS_BOARDS = [
-  { id: '18379251681', country: 'UK' },
+  { id: '18379251681', country: 'UK', countries: ['UK', 'IE'] },
   { id: '18391075175', country: 'DE' },
   { id: '18396748434', country: 'NL' }
 ];
@@ -145,7 +145,7 @@ export function classifyInstallOutcome(installPhase) {
   const v = (installPhase || '').trim().toLowerCase();
   if (!v) return 'pending';
   if (
-    v.includes('cancel') || v.includes('deinstall') || v.includes('deiinstall') ||
+    v.includes('abort') || v.includes('partial') || v.includes('cancel') || v.includes('deinstall') || v.includes('deiinstall') ||
     v.includes('revisit') || v === 'stuck' || v.includes('not live') || v.includes('postponed')
   ) {
     return 'issue';
@@ -154,4 +154,14 @@ export function classifyInstallOutcome(installPhase) {
     return 'success';
   }
   return 'pending';
+}
+
+// These later-added form fields differ by market; do not reuse one ID globally.
+export const READINESS_EXTRA_COLUMNS = {
+  UK: { tableOrdered: 'single_select9i5gdtk', floorplan: 'single_selecteeh7rio' },
+  DE: { tableOrdered: 'single_selectztongf2', floorplan: 'single_selectfc2hq66' },
+  NL: { tableOrdered: 'single_selectojxswdf', floorplan: 'single_selectabkgsdx' }
+};
+export function readinessKey(country, storeId) {
+  return `${country === 'IE' ? 'UK' : country}:${String(storeId || '').trim()}`;
 }
