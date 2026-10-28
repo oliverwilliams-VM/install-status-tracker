@@ -9,3 +9,6 @@
 
 .rd-table .rd-badge{white-space:normal;max-width:230px;line-height:1.5}.rd-portal details p{font-size:12px;line-height:1.7}
 .rd-bound-project{padding:17px;background:#e9f3f8;border-left:3px solid #006eaa;border-radius:5px;display:flex;flex-direction:column;gap:8px}.rd-bound-project small{font-size:10px;text-transform:uppercase;letter-spacing:.07em}.rd-bound-project strong{font-size:17px}.rd-bound-project p{font-size:12px;line-height:1.6;margin:0}.rd-project-check{margin:0 0 28px}.rd-project-check .rd-text-button{margin:14px 0}
+
+/* Preserve the supplied light VM wordmark with a readable neutral backing. */
+.rd-brand img:last-child{background:#171717;padding:8px 12px;border-radius:5px;box-sizing:content-box}
