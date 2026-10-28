@@ -18,10 +18,17 @@ function doPost(e) {
   var save=function(r){var encoded=JSON.stringify(r);if(encoded.length>1500000)throw Error('Archive capacity requires review');if(file)file.setContent(encoded);else file=folder.createFile(c.id+'.json',encoded,'application/json');if(file.getBlob().getDataAsString()!==encoded)throw Error('State write unconfirmed');};
   if(c.operation==='submit')out={ok:true,result:RD_submit_(record,c,save,p)};
   else {
-   if(['issue','reschedule','cancel','reserveMail','confirmSent','note','review'].indexOf(c.operation)>=0&&p.getProperty('RD_OPERATOR_ENABLED')!=='YES')throw Error('Operator transitions disabled');
-   if(c.operation==='issue'||c.operation==='reschedule'){if(c.binding&&c.binding.id!==c.id)throw Error('Request binding mismatch');RD_verifySource_(c,p);}
+   if(['issue','reschedule','rebindContext','cancel','reserveMail','confirmSent','note','review'].indexOf(c.operation)>=0&&p.getProperty('RD_OPERATOR_ENABLED')!=='YES')throw Error('Operator transitions disabled');
+   if(c.operation==='issue'||c.operation==='reschedule'||c.operation==='rebindContext'){if(c.binding&&c.binding.id!==c.id)throw Error('Request binding mismatch');RD_verifySource_(c,p,record);}
    if(c.operation==='open')RD_assertCurrent_(record,p);
-   var result=reduce(record,c,Date.now());if(c.operation!=='open'&&c.operation!=='plan')save(result.record);out={ok:true,result:result.result};
+   var result=reduce(record,c,Date.now());if(c.operation!=='open'&&c.operation!=='plan')save(result.record);
+   if(c.operation==='reportProjectMismatch'&&!result.result.duplicate){
+    result.record.projectTypeIssue.mondayStatus='pending';save(result.record);
+    var body='READINESS PROJECT TYPE CHECK — '+result.record.binding.store+'\n'+c.reason.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    var receipt=RD_monday_('mutation($i:ID!,$body:String!){create_update(item_id:$i,body:$body){id}}',{i:result.record.binding.itemId,body:body},p);
+    result.record.projectTypeIssue.mondayStatus='recorded';result.record.projectTypeIssue.updateId=receipt.create_update.id;save(result.record);
+   }
+   out={ok:true,result:result.result};
   }
  } catch(err){out={ok:false,error:String(err.message||'Readiness coordinator failed')};}
  finally{if(held)lock.releaseLock();}
@@ -36,19 +43,21 @@ function RD_monday_(query,variables,p){
  var response=UrlFetchApp.fetch('https://api.monday.com/v2',{method:'post',contentType:'application/json',headers:{Authorization:token,'API-Version':'2026-04'},payload:JSON.stringify({query:query,variables:variables}),muteHttpExceptions:true});
  var result=JSON.parse(response.getContentText());if(response.getResponseCode()!==200||result.errors||!result.data)throw Error('Monday operation unconfirmed');return result.data;
 }
-function RD_verifySource_(c,p){
+function RD_verifySource_(c,p,previous){
  // This mapping must be reviewed against CURRENT Brain columns, never guessed.
  var m=JSON.parse(p.getProperty('RD_SOURCE_MAP')||'null');if(!m||!m.brainBoardId||!m.installLinkColumn||!m.countryColumn||!m.fzeEmailColumn||!m.mfpEmailColumn||!m.installDateColumn)throw Error('Verified Brain source mapping required');
  if(!/^\d+$/.test(String(c.brainItemId||'')))throw Error('Bound Brain item required');
  var data=RD_monday_('query($ids:[ID!]!){items(ids:$ids){id name board{id} column_values{id text value ... on BoardRelationValue{linked_item_ids}}}}',{ids:[String(c.brainItemId)]},p),item=data.items[0];
  if(!item||String(item.board.id)!==String(m.brainBoardId))throw Error('Brain identity mismatch');
  var values={};item.column_values.forEach(function(v){values[v.id]=v;});
- var binding=c.binding;if(c.operation==='reschedule')binding={itemId:c.installItemId,country:c.country,installDate:c.installDate};
+ var binding=c.binding;if(c.operation==='reschedule')binding=Object.assign({},previous.binding,{installDate:c.installDate});
  var links=values[m.installLinkColumn];if(!links||!links.linked_item_ids||links.linked_item_ids.length!==1||String(links.linked_item_ids[0])!==String(binding.itemId))throw Error('Exact installation relationship required');
  var country=market((values[m.countryColumn]||{}).text);if(country!==market(binding.country))throw Error('Market mismatch');
  if(c.operation==='issue'&&((values[m.fzeEmailColumn]||{}).text!==c.fzeEmail||(values[m.mfpEmailColumn]||{}).text!==c.mfpEmail||String(item.name).trim()!==binding.store))throw Error('Recipient/store source mismatch');
  var value=JSON.parse((values[m.installDateColumn]||{}).value||'null');if(!value||value.date!==binding.installDate)throw Error('Install date changed');
- c.sourceVerified=true;c.sourceReference={brainItemId:item.id,verifiedAt:new Date().toISOString()};
+ var evidence=RD_projectEvidence_(item,p);
+ if(binding.projectType!==evidence.projectType||binding.installType!==evidence.installType)throw Error('Invitation context differs from Monday');
+ c.sourceVerified=true;c.sourceReference={brainItemId:item.id,verifiedAt:new Date().toISOString(),projectEvidence:evidence};
 }
 function RD_submit_(previous,c,save,p){
  if(p.getProperty('RD_WRITES_APPROVED')!=='YES')throw Error('Submission filing not activated');
@@ -108,5 +117,27 @@ function RD_assertCurrent_(record,p){
  var cols={};i.column_values.forEach(function(v){cols[v.id]=v;});
  var dateCol={UK:'date',IE:'date1__1',NL:'date',DE:'date3'}[market(b.country)],phaseCol=market(b.country)==='IE'?'status__1':'status';
  var date=JSON.parse((cols[dateCol]||{}).value||'null'),phase=(cols[phaseCol]||{}).text||'';
+ RD_assertProjectCurrent_(record,p);
  if(!date||date.date!==b.installDate||/cancel|postpon|on.?hold|abort|partial|revisit|complete|hypercare|installed|live/i.test(phase))throw Error('Installation changed or no longer pending; reconcile invitation');
+}
+
+// Verified schema on 28 October 2026. Exact Brain→Sign Up identity, no name matching.
+function RD_projectEvidence_(brain,p){
+ if(String(brain.board.id)!=='18432365825')throw Error('Project source must be the verified Brain board');
+ var v={};brain.column_values.forEach(function(c){v[c.id]=c;});
+ var link=v.board_relation_mm7s293s;if(!link||!link.linked_item_ids||link.linked_item_ids.length!==1)throw Error('Exactly one linked Sign Up store required');
+ var signup=RD_monday_('query($ids:[ID!]!){items(ids:$ids){id board{id} column_values{id text value}}}',{ids:[String(link.linked_item_ids[0])]},p).items[0];
+ if(!signup||String(signup.board.id)!=='5678025992')throw Error('Sign Up source identity mismatch');
+ var s={};signup.column_values.forEach(function(c){s[c.id]=c;});
+ var raw=[(v.color_mm7f7r9d||{}).text,(s.dup__of_store_type5__1||{}).text];
+ if((s.label7||{}).text)raw.push(s.label7.text);
+ return {projectType:verifiedProjectType(raw),installType:equipmentTypeFromMonday((v.dropdown_mm7ftf76||{}).text),brainProjectColumn:'color_mm7f7r9d',signupItemId:String(signup.id),signupOpeningColumn:'dup__of_store_type5__1',signupProjectColumn:'label7',rawLabels:raw};
+}
+function RD_assertProjectCurrent_(record,p){
+ var id=(record.sourceReference||{}).brainItemId;if(!id)throw Error('Verified Brain project binding required');
+ var item=RD_monday_('query($ids:[ID!]!){items(ids:$ids){id board{id} column_values{id text value ... on BoardRelationValue{linked_item_ids}}}}',{ids:[String(id)]},p).items[0];
+ if(!item)throw Error('Brain source unavailable');
+ var proof=RD_projectEvidence_(item,p);
+ if(proof.projectType!==record.binding.projectType||proof.installType!==record.binding.installType)throw Error('Project or equipment context changed; replace invitation');
+ if((record.sourceReference.projectEvidence||{}).signupItemId&&record.sourceReference.projectEvidence.signupItemId!==proof.signupItemId)throw Error('Linked Sign Up store changed');
 }

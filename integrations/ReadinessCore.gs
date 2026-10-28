@@ -27,6 +27,7 @@ function milestones(installDate) {
 function validateBinding(b) {
   if (!b || !/^[a-zA-Z0-9_-]{1,80}$/.test(b.id || '') || !/^\d{1,10}$/.test(b.store || '') || !/^\d+$/.test(b.itemId || '') || !/^\d+$/.test(b.boardId || '') || !['sfk', 'other'].includes(b.installType)) throw Error('Invalid installation binding');
   market(b.country); dateOnly(b.installDate);
+  if (!['new','remodel','trading'].includes(b.projectType)) throw Error('Verified project type required');
   const expected = { UK: '5678172488', IE: '7519472262', NL: '5757397415', DE: '5757508504' }[market(b.country)];
   if (expected !== b.boardId) throw Error('Country and install board do not match');
   return b;
@@ -66,8 +67,10 @@ function validateAnswers(answers, installType, binding = {}) {
     out.acknowledgementAccepted = true;
     out.acknowledgementVersion = 'readiness-ack-v1';
     if (!out.comments) throw Error('Comments require an answer; use None if not applicable');
-    if (!['trading', 'new', 'remodel'].includes(answers.storeType)) throw Error('Store type required');
-    out.storeType = answers.storeType;
+    if (!['new','remodel','trading'].includes(binding.projectType)) throw Error('Verified project type required');
+    if (answers.storeType && answers.storeType !== binding.projectType) throw Error('Project type cannot be changed by a respondent');
+    answers = { ...answers, storeType: binding.projectType };
+    out.storeType = binding.projectType;
     for (const key of requiredReadinessChecks(answers, installType)) {
       if (!['yes', 'no', 'pending'].includes(answers[key])) throw Error('Answer every applicable readiness question');
       out[key] = answers[key];
@@ -134,6 +137,7 @@ function blockers(answers, installType, binding = {}) {
 }
 function vmReadiness(record) {
   const gaps = blockers(record.answers, record.binding.installType, record.binding);
+  if (record.projectTypeIssue) return { label: 'Project type flagged — team review required', ready: false };
   if (!record.submitted) return { label: 'Awaiting FZE response', ready: false };
   if (record.answers?.schemaVersion !== 2) return { label: 'Legacy response — updated checks required', ready: false };
   if (gaps.length) return { label: 'Readiness gaps', ready: false };
@@ -143,6 +147,7 @@ function vmReadiness(record) {
 }
 function planReminder(record, today) {
   dateOnly(today);
+  if (record.projectTypeIssue) return {state:'stopped',reason:'Project type discrepancy requires team review'};
   if (record.cancelled || record.completed || ['Live', 'Postponed', 'Partially completed', 'Aborted'].includes(record.outcome) || record.submitted || today >= record.binding.installDate) return { state: 'stopped', reason: record.submitted ? 'Response received; follow up blockers separately' : 'No outstanding future install' };
   const due = milestones(record.binding.installDate).filter(x => x.date <= today);
   if (!due.length) return { state: 'waiting', next: milestones(record.binding.installDate)[0].date };
@@ -189,9 +194,30 @@ function installOutcome(phase) {
 
 function requiredEvidence(a, type) { return [...(type === 'sfk' && a.tableInStore === 'yes' ? ['table'] : []), ...(a.powerData === 'yes' ? ['powerData'] : []), ...(a.peds === 'yes' ? ['peds'] : []), ...(a.kitDelivered === 'yes' && (a.kitComplete !== 'yes' || a.kitUndamaged !== 'yes') ? ['kit'] : [])]; }
 
+// Exact reviewed Monday labels; equipment labels never imply an opening type.
+function projectTypeFromMonday(value) {
+  const v = String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const types = { 'nro':'new', 'new restaurant opening':'new', 'nro - sw special':'new', 'remodel':'remodel', 're-model':'remodel', 'remodel - sw special':'remodel', 'retrofit':'trading', 'retro - fresh forward':'trading', 'retro - metro':'trading' };
+  if (!types[v]) throw Error('Missing or unsupported Monday project type');
+  return types[v];
+}
+function verifiedProjectType(values) {
+  if (!Array.isArray(values) || !values.length) throw Error('Monday project evidence required');
+  const types = values.map(projectTypeFromMonday);
+  if (new Set(types).size !== 1) throw Error('Conflicting Monday project types');
+  return types[0];
+}
+function equipmentTypeFromMonday(value) {
+  const v = String(value || '').trim().toLowerCase();
+  if (['sfk 22in','sfk 15in','small format kiosk'].includes(v)) return 'sfk';
+  if (['27in single-sided','27in double-sided','27in wall-mounted','27" bau kiosks','22in flyte'].includes(v)) return 'other';
+  throw Error('Missing or unsupported Monday equipment type');
+}
+
 // Country-native readiness questions. No service commitment beyond installation and handover.
 const EXTRA_COPY = {
  en: {
+  assignedProjectType:'Project type recorded by the installation team', assignedProjectHelp:'This is pre-filled from Monday. You do not need to choose your project type.', wrongProject:'This project type is not correct — contact the team', wrongProjectReason:'Tell the installation team what is incorrect', sendProjectIssue:'Send project-type correction request', projectIssueSaved:'The project type has been flagged to the installation team. Readiness submission and reminders are on hold until the team checks the record.', projectIssueError:'We could not record your request. Please contact the installation team.', projectIssueRequired:'Describe what is incorrect (at least 5 characters).',
   nroOpeningDateKnown:'Is the planned store opening date known?', nroOpeningDate:'What is the planned store opening date?', nroOpeningDateConfirmed:'Is the store opening date confirmed and still correct?', nroSourceOpening:'Store opening date currently recorded', reopeningDateKnown:'Is the planned store reopening date known?', reopeningDate:'What is the planned store reopening date?', reopeningDateConfirmed:'Is the store reopening date confirmed and still correct?', reopeningSourceOpening:'Store reopening date currently recorded',
   table:'Has your SFK table been ordered?', tableOrderDate:'When was the table ordered?', tableInStore:'Has the table been delivered to your restaurant?', tableDeliveryStatus:'If not delivered, do you have a confirmed delivery date or an ETA?', confirmed:'Confirmed delivery date', eta:'Estimated delivery date (ETA)', unknown:'No delivery date or ETA yet', tableDelivery:'Delivery date / ETA',
   tableDeliveryKnown:'Is the table delivery date confirmed?', worksCompletionKnown:'Is the building works completion date known?', acknowledgementLabel:'Read and acknowledge before submitting', acknowledgement:'I confirm that I have read the installation guides applicable to this restaurant and installation type, and that the answers supplied are accurate to the best of my knowledge. I understand that if the required preparations, equipment or access are not in place on the installation day, the installation may be delayed or aborted. Revisit charges and charges for corrective work may apply in accordance with our agreed terms. I will inform the installation team if any answer or date changes.', provided:'Photo attached', unavailable:'Photo not available yet', evidenceReason:'Why is this photo unavailable, and when can it be supplied?', requiredHint:'Every applicable question is required. Enter “None” where there is nothing to add; choose an explicit unknown/not-yet answer where needed.', acknowledgementRequired:'Read the applicable guides and tick the acknowledgement to submit.',
@@ -205,6 +231,7 @@ const EXTRA_COPY = {
   tablePhoto:'Table and installation area', powerPhoto:'Power and data', pedsPhoto:'Payment terminals', kitPhoto:'Kit / missing or damaged items', photoHint:'One JPEG or PNG per category, maximum 700 KB each. Required evidence remains a visible gap until supplied.', photosError:'Use a JPEG/PNG photo of 700 KB or less.', saveError:'Please check the required answers, contact details and outstanding-work details.', reviewPending:'Your response is saved for the installation team to review. Submission is not approval to proceed.'
  },
  nl: {
+  assignedProjectType:'Projecttype geregistreerd door het installatieteam', assignedProjectHelp:'Dit is vooraf ingevuld vanuit Monday. U hoeft uw projecttype niet te kiezen.', wrongProject:'Dit projecttype is niet correct — neem contact op met het team', wrongProjectReason:'Vertel het installatieteam wat niet correct is', sendProjectIssue:'Correctieverzoek voor projecttype versturen', projectIssueSaved:'Het projecttype is gemeld bij het installatieteam. Gereedheidsinzending en herinneringen zijn gepauzeerd totdat het team de registratie heeft gecontroleerd.', projectIssueError:'Uw verzoek kon niet worden opgeslagen. Neem contact op met het installatieteam.', projectIssueRequired:'Beschrijf wat niet correct is (minimaal 5 tekens).',
   nroOpeningDateKnown:'Is de geplande openingsdatum van het restaurant bekend?', nroOpeningDate:'Wat is de geplande openingsdatum van het restaurant?', nroOpeningDateConfirmed:'Is de openingsdatum bevestigd en nog correct?', nroSourceOpening:'Huidige geregistreerde openingsdatum', reopeningDateKnown:'Is de geplande heropeningsdatum van het restaurant bekend?', reopeningDate:'Wat is de geplande heropeningsdatum van het restaurant?', reopeningDateConfirmed:'Is de heropeningsdatum bevestigd en nog correct?', reopeningSourceOpening:'Huidige geregistreerde heropeningsdatum',
   table:'Is uw SFK-tafel besteld?', tableOrderDate:'Wanneer is de tafel besteld?', tableInStore:'Is de tafel bij uw restaurant afgeleverd?', tableDeliveryStatus:'Heeft u, als de tafel nog niet is geleverd, een bevestigde leverdatum of een verwachte leverdatum?', confirmed:'Bevestigde leverdatum', eta:'Verwachte leverdatum (ETA)', unknown:'Nog geen leverdatum of verwachte leverdatum', tableDelivery:'Leverdatum / verwachte leverdatum',
   tableDeliveryKnown:'Is de leverdatum van de tafel bevestigd?', worksCompletionKnown:'Is de einddatum van de bouwwerkzaamheden bekend?', acknowledgementLabel:'Lees en bevestig vóór het versturen', acknowledgement:'Ik bevestig dat ik de installatiehandleidingen heb gelezen die van toepassing zijn op dit restaurant en dit type installatie, en dat de verstrekte antwoorden naar mijn beste weten juist zijn. Ik begrijp dat de installatie kan worden uitgesteld of afgebroken als de vereiste voorbereidingen, apparatuur of toegang op de installatiedag niet in orde zijn. Kosten voor een nieuw bezoek en voor herstelwerkzaamheden kunnen in rekening worden gebracht overeenkomstig onze overeengekomen voorwaarden. Ik informeer het installatieteam als een antwoord of datum verandert.', provided:'Foto toegevoegd', unavailable:'Foto nog niet beschikbaar', evidenceReason:'Waarom is deze foto niet beschikbaar en wanneer kan deze worden aangeleverd?', requiredHint:'Elke toepasselijke vraag is verplicht. Vul “Geen” in als er niets toe te voegen is; kies een expliciet antwoord als iets onbekend of nog niet gereed is.', acknowledgementRequired:'Lees de toepasselijke handleidingen en vink de bevestiging aan om te versturen.',
@@ -218,6 +245,7 @@ const EXTRA_COPY = {
   tablePhoto:'Tafel en installatiezone', powerPhoto:'Stroom en data', pedsPhoto:'Betaalterminals', kitPhoto:'Apparatuur / ontbrekende of beschadigde onderdelen', photoHint:'Eén JPEG- of PNG-foto per categorie, maximaal 700 KB. Ontbrekende vereiste foto’s blijven als open punt zichtbaar.', photosError:'Gebruik een JPEG- of PNG-foto van maximaal 700 KB.', saveError:'Controleer de verplichte antwoorden, contactgegevens en openstaande punten.', reviewPending:'Uw reactie is opgeslagen ter beoordeling door het installatieteam. Het versturen is geen goedkeuring om door te gaan.'
  },
  de: {
+  assignedProjectType:'Vom Installationsteam erfasster Projekttyp', assignedProjectHelp:'Diese Angabe wird aus Monday übernommen. Sie müssen den Projekttyp nicht auswählen.', wrongProject:'Dieser Projekttyp ist nicht korrekt — Team kontaktieren', wrongProjectReason:'Teilen Sie dem Installationsteam mit, was nicht korrekt ist', sendProjectIssue:'Korrekturanfrage zum Projekttyp senden', projectIssueSaved:'Der Projekttyp wurde dem Installationsteam gemeldet. Bereitschaftsmeldungen und Erinnerungen sind pausiert, bis das Team den Datensatz geprüft hat.', projectIssueError:'Ihre Anfrage konnte nicht gespeichert werden. Bitte kontaktieren Sie das Installationsteam.', projectIssueRequired:'Beschreiben Sie die falsche Angabe (mindestens 5 Zeichen).',
   nroOpeningDateKnown:'Ist der geplante Eröffnungstermin des Restaurants bekannt?', nroOpeningDate:'Wann ist die geplante Eröffnung des Restaurants?', nroOpeningDateConfirmed:'Ist der Eröffnungstermin bestätigt und weiterhin korrekt?', nroSourceOpening:'Derzeit erfasster Eröffnungstermin', reopeningDateKnown:'Ist der geplante Wiedereröffnungstermin des Restaurants bekannt?', reopeningDate:'Wann ist die geplante Wiedereröffnung des Restaurants?', reopeningDateConfirmed:'Ist der Wiedereröffnungstermin bestätigt und weiterhin korrekt?', reopeningSourceOpening:'Derzeit erfasster Wiedereröffnungstermin',
   table:'Wurde Ihr SFK-Tisch bestellt?', tableOrderDate:'Wann wurde der Tisch bestellt?', tableInStore:'Wurde der Tisch an Ihr Restaurant geliefert?', tableDeliveryStatus:'Liegt bei ausstehender Lieferung ein bestätigter oder voraussichtlicher Liefertermin vor?', confirmed:'Bestätigter Liefertermin', eta:'Voraussichtlicher Liefertermin (ETA)', unknown:'Noch kein bestätigter oder voraussichtlicher Liefertermin', tableDelivery:'Liefertermin / voraussichtlicher Liefertermin',
   tableDeliveryKnown:'Ist der Liefertermin des Tisches bestätigt?', worksCompletionKnown:'Ist der Abschlusstermin der Bauarbeiten bekannt?', acknowledgementLabel:'Vor dem Absenden lesen und bestätigen', acknowledgement:'Ich bestätige, dass ich die für dieses Restaurant und diesen Installationstyp geltenden Installationsanleitungen gelesen habe und dass meine Angaben nach bestem Wissen richtig sind. Ich verstehe, dass die Installation verschoben oder abgebrochen werden kann, wenn die erforderlichen Vorbereitungen, Geräte oder Zugangsmöglichkeiten am Installationstag nicht vorhanden sind. Gebühren für erneute Anfahrten und für Korrekturarbeiten können gemäß unseren vereinbarten Bedingungen anfallen. Ich informiere das Installationsteam, wenn sich eine Antwort oder ein Termin ändert.', provided:'Foto angehängt', unavailable:'Foto noch nicht verfügbar', evidenceReason:'Warum ist dieses Foto nicht verfügbar und wann kann es bereitgestellt werden?', requiredHint:'Jede zutreffende Frage ist verpflichtend. Tragen Sie „Keine“ ein, wenn nichts hinzuzufügen ist; wählen Sie eine ausdrückliche Antwort, wenn etwas unbekannt oder noch nicht bereit ist.', acknowledgementRequired:'Lesen Sie die zutreffenden Anleitungen und setzen Sie das Bestätigungshäkchen, um abzusenden.',
@@ -283,6 +311,16 @@ function reduce(previous, c, now) {
  }
  if (!previous) throw Error('Request not found');
  const r = JSON.parse(JSON.stringify(previous));
+ if (c.operation === 'rebindContext') {
+  if (!c.sourceVerified || r.pendingMail || r.pendingSubmission) throw Error('Verified context and reconciled operations required');
+  validateBinding(c.binding);
+  for (const k of ['id','store','country','boardId','itemId']) if(c.binding[k]!==r.binding[k])throw Error('Cannot rebind to a different installation');
+  if(c.binding.projectType===r.binding.projectType&&c.binding.installType===r.binding.installType&&c.binding.installDate===r.binding.installDate&&!r.projectTypeIssue)return {record:r,result:{revision:r.revision}};
+  if(!/^[a-f0-9]{64}$/.test(c.tokenHash||'')||!(c.expires>now))throw Error('Replacement token required');
+  r.history.push({type:'context-rebound',at,previousBinding:r.binding,previousRevision:r.revision,previousAnswers:r.answers,previousIssue:r.projectTypeIssue||null});
+  r.binding=c.binding;r.sourceReference=c.sourceReference;r.revision+=1;r.tokenHash=c.tokenHash;r.expires=c.expires;r.answers=null;r.submitted=false;r.sent={};r.submissions={};r.vmReview=null;r.projectTypeIssue=null;
+  return {record:r,result:{revision:r.revision}};
+ }
  if (c.operation === 'reschedule') {
   if (!c.sourceVerified || r.pendingMail || r.pendingSubmission) throw Error('Verified reschedule and reconciled operations required');
   const next = reschedule(r,c.installDate);
@@ -295,9 +333,15 @@ function reduce(previous, c, now) {
   if (r.pendingMail || r.pendingSubmission) throw Error('Reconcile pending work');
   r.cancelled=true;r.history.push({type:'cancelled',at});return {record:r,result:{cancelled:true}};
  }
- if (['open','beginSubmission','commitSubmission'].includes(c.operation) && (r.cancelled || r.revision!==c.revision || c.tokenHash!==r.tokenHash || !(r.expires>now))) throw Error('Expired or replaced link');
- if (c.operation==='open') return {record:r,result:{binding:r.binding,revision:r.revision,submitted:r.submitted,answers:r.answers,vmReviewStatus:r.vmReview?.decision || 'pending',history:r.history.filter(h=>h.type==='submission').map(h=>({id:h.id,at:h.at,answers:h.answers,acknowledgement:h.acknowledgement,files:h.files.map(f=>({name:f.name}))}))}};
+ if (['open','beginSubmission','commitSubmission','reportProjectMismatch'].includes(c.operation) && (r.cancelled || r.revision!==c.revision || c.tokenHash!==r.tokenHash || !(r.expires>now))) throw Error('Expired or replaced link');
+ if (c.operation==='open') return {record:r,result:{binding:r.binding,revision:r.revision,submitted:r.submitted,answers:r.answers,projectTypeIssue:r.projectTypeIssue || null,vmReviewStatus:r.vmReview?.decision || 'pending',history:r.history.filter(h=>h.type==='submission').map(h=>({id:h.id,at:h.at,answers:h.answers,acknowledgement:h.acknowledgement,files:h.files.map(f=>({name:f.name}))}))}};
+ if (c.operation==='reportProjectMismatch') {
+  if(typeof c.reason!=='string'||c.reason.trim().length<5||c.reason.length>1000)throw Error('Project discrepancy explanation required');
+  if(r.projectTypeIssue)return {record:r,result:{flagged:true,duplicate:true}};
+  r.projectTypeIssue={reason:c.reason.trim(),at,revision:r.revision};r.vmReview=null;r.history.push({type:'project-type-issue',...r.projectTypeIssue});return {record:r,result:{flagged:true}};
+ }
  if (c.operation==='beginSubmission') {
+  if(r.projectTypeIssue)throw Error('Project type must be reviewed before readiness submission');
   if (!/^[a-zA-Z0-9-]{16,80}$/.test(c.submissionId || '')) throw Error('Invalid submission ID');
   const old=r.submissions[c.submissionId];
   if (old) {if(old.digest!==c.digest)throw Error('Submission ID reused');return {record:r,result:{completed:true,...old}};}
@@ -324,7 +368,7 @@ function reduce(previous, c, now) {
  }
  if(c.operation==='review'){
   if(!['pending','hold','approved'].includes(c.decision)||!c.reviewer?.trim())throw Error('Reviewer and decision required');
-  if(c.decision==='approved'&&(!r.submitted||r.answers?.schemaVersion!==2||blockers(r.answers,r.binding.installType,r.binding).length))throw Error('Cannot approve incomplete readiness');
+  if(c.decision==='approved'&&(r.projectTypeIssue||!r.submitted||r.answers?.schemaVersion!==2||blockers(r.answers,r.binding.installType,r.binding).length))throw Error('Cannot approve incomplete readiness');
   r.vmReview={decision:c.decision,reviewer:c.reviewer.trim(),at,revision:r.revision,submissionCount:r.history.filter(h=>h.answers).length};r.history.push({type:'vm-review',...r.vmReview});return {record:r,result:r.vmReview};
  }
  if(c.operation==='note'){

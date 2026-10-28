@@ -18,8 +18,9 @@ export default async function handler(req,res){
   const origin=new URL(process.env.READINESS_PORTAL_ORIGIN);if(origin.protocol!=='https:'||req.headers.origin!==origin.origin)throw Error('Invalid origin');
   if(!String(req.headers['content-type']||'').startsWith('application/json'))throw Error('JSON required');
   const token=String(req.headers.authorization||'').replace(/^Bearer /,''),access=verifyToken(token,process.env.READINESS_LINK_SECRET),b=req.body;
-  if(!b||!['open','submit'].includes(b.operation))throw Error('Invalid operation');
+  if(!b||!['open','submit','reportProjectMismatch'].includes(b.operation))throw Error('Invalid operation');
   const c={operation:b.operation,id:access.id,revision:access.revision,tokenHash:access.tokenHash};
+  if(b.operation==='reportProjectMismatch'){if(typeof b.reason!=='string'||b.reason.trim().length<5||b.reason.length>1000)throw Error('Reason required');c.reason=b.reason.trim();}
   if(b.operation==='submit'){
    if(b.answers?.schemaVersion!==2)throw Error('Expanded readiness form and acknowledgement required');
    if(!/^[a-zA-Z0-9-]{16,80}$/.test(b.submissionId||''))throw Error('Invalid submission ID');

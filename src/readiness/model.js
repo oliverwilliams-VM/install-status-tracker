@@ -25,6 +25,7 @@ export function milestones(installDate) {
 export function validateBinding(b) {
   if (!b || !/^[a-zA-Z0-9_-]{1,80}$/.test(b.id || '') || !/^\d{1,10}$/.test(b.store || '') || !/^\d+$/.test(b.itemId || '') || !/^\d+$/.test(b.boardId || '') || !['sfk', 'other'].includes(b.installType)) throw Error('Invalid installation binding');
   market(b.country); dateOnly(b.installDate);
+  if (!['new','remodel','trading'].includes(b.projectType)) throw Error('Verified project type required');
   const expected = { UK: '5678172488', IE: '7519472262', NL: '5757397415', DE: '5757508504' }[market(b.country)];
   if (expected !== b.boardId) throw Error('Country and install board do not match');
   return b;
@@ -64,8 +65,10 @@ export function validateAnswers(answers, installType, binding = {}) {
     out.acknowledgementAccepted = true;
     out.acknowledgementVersion = 'readiness-ack-v1';
     if (!out.comments) throw Error('Comments require an answer; use None if not applicable');
-    if (!['trading', 'new', 'remodel'].includes(answers.storeType)) throw Error('Store type required');
-    out.storeType = answers.storeType;
+    if (!['new','remodel','trading'].includes(binding.projectType)) throw Error('Verified project type required');
+    if (answers.storeType && answers.storeType !== binding.projectType) throw Error('Project type cannot be changed by a respondent');
+    answers = { ...answers, storeType: binding.projectType };
+    out.storeType = binding.projectType;
     for (const key of requiredReadinessChecks(answers, installType)) {
       if (!['yes', 'no', 'pending'].includes(answers[key])) throw Error('Answer every applicable readiness question');
       out[key] = answers[key];
@@ -132,6 +135,7 @@ export function blockers(answers, installType, binding = {}) {
 }
 export function vmReadiness(record) {
   const gaps = blockers(record.answers, record.binding.installType, record.binding);
+  if (record.projectTypeIssue) return { label: 'Project type flagged — team review required', ready: false };
   if (!record.submitted) return { label: 'Awaiting FZE response', ready: false };
   if (record.answers?.schemaVersion !== 2) return { label: 'Legacy response — updated checks required', ready: false };
   if (gaps.length) return { label: 'Readiness gaps', ready: false };
@@ -141,6 +145,7 @@ export function vmReadiness(record) {
 }
 export function planReminder(record, today) {
   dateOnly(today);
+  if (record.projectTypeIssue) return {state:'stopped',reason:'Project type discrepancy requires team review'};
   if (record.cancelled || record.completed || ['Live', 'Postponed', 'Partially completed', 'Aborted'].includes(record.outcome) || record.submitted || today >= record.binding.installDate) return { state: 'stopped', reason: record.submitted ? 'Response received; follow up blockers separately' : 'No outstanding future install' };
   const due = milestones(record.binding.installDate).filter(x => x.date <= today);
   if (!due.length) return { state: 'waiting', next: milestones(record.binding.installDate)[0].date };
@@ -186,3 +191,23 @@ export function installOutcome(phase) {
 }
 
 export function requiredEvidence(a, type) { return [...(type === 'sfk' && a.tableInStore === 'yes' ? ['table'] : []), ...(a.powerData === 'yes' ? ['powerData'] : []), ...(a.peds === 'yes' ? ['peds'] : []), ...(a.kitDelivered === 'yes' && (a.kitComplete !== 'yes' || a.kitUndamaged !== 'yes') ? ['kit'] : [])]; }
+
+// Exact reviewed Monday labels; equipment labels never imply an opening type.
+export function projectTypeFromMonday(value) {
+  const v = String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const types = { 'nro':'new', 'new restaurant opening':'new', 'nro - sw special':'new', 'remodel':'remodel', 're-model':'remodel', 'remodel - sw special':'remodel', 'retrofit':'trading', 'retro - fresh forward':'trading', 'retro - metro':'trading' };
+  if (!types[v]) throw Error('Missing or unsupported Monday project type');
+  return types[v];
+}
+export function verifiedProjectType(values) {
+  if (!Array.isArray(values) || !values.length) throw Error('Monday project evidence required');
+  const types = values.map(projectTypeFromMonday);
+  if (new Set(types).size !== 1) throw Error('Conflicting Monday project types');
+  return types[0];
+}
+export function equipmentTypeFromMonday(value) {
+  const v = String(value || '').trim().toLowerCase();
+  if (['sfk 22in','sfk 15in','small format kiosk'].includes(v)) return 'sfk';
+  if (['27in single-sided','27in double-sided','27in wall-mounted','27" bau kiosks','22in flyte'].includes(v)) return 'other';
+  throw Error('Missing or unsupported Monday equipment type');
+}
