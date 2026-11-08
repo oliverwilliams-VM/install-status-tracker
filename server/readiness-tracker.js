@@ -1,7 +1,9 @@
 import sources from './tracker-sources.json' with { type: 'json' };
 
+import {installReadiness} from './install-readiness.js';
+
 const BRAIN_ID = '18432365825';
-const BRAIN_COLUMNS = ['board_relation_mm7s293s','country_mm7fphac','boolean_mm8q7cvs','boolean_mm8qvyqt','boolean_mm8qa0fn','color_mm8daknj','lookup_mm8vv96a','color_mm7h7hf1','long_text_mm7fzxz1'];
+const BRAIN_COLUMNS = ['board_relation_mm7s293s','country_mm7fphac','boolean_mm8q7cvs','boolean_mm8qvyqt','boolean_mm8qa0fn','color_mm8daknj','lookup_mm8vv96a','color_mm7h7hf1','long_text_mm7fzxz1','date_mm7f8hw6','long_text_mm8xk5vw','long_text_mm8xeb55','text_mm8xen8a','date_mm8xx6fr','color_mm8x8cxv','date_mm8x4m1e'];
 const SIGNUP_COLUMNS = ['hardware_placement','color_mm8ckctx'];
 const CLOSED = new Set(['Closed','Revisit done','Waived']);
 const GOOD_PHASE = /^(Complete|Installed|Installed\/Hypercare|Installed\/Hypercare|Hypercare|Live - Non-Integrated)$/i;
@@ -130,7 +132,9 @@ export function joinTracker(raw, health = {}) {
         brain && /^ordered/i.test(text(brain,'color_mm8daknj')) ? 'Yes' : signup && /^ordered/i.test(text(signup,'color_mm8ckctx')) ? 'Yes' : (brain && /^not ordered$/i.test(text(brain,'color_mm8daknj'))) ? 'No' : 'Unknown';
       const hardwareStatus = text(row,config.hardware);
       const physical = response?.hardware !== 'Unknown' && response?.hardware ? response.hardware : /^(delivered|received)$/i.test(hardwareStatus) ? 'Yes' : 'Unknown';
-      const notes = text(row,config.notes);
+      const legacyNotes=text(row,config.notes);
+      const notes=brain?text(brain,'long_text_mm8xk5vw'):'';
+      const readiness=installReadiness({date:installDate,complete:good&&!activeIssues.length,conflictingDate:brain&&date(brain,'date_mm7f8hw6')&&date(brain,'date_mm7f8hw6')!==installDate,sourcesHealthy:health.incidents?.ok!==false&&health.responses?.ok!==false,activeIssues:activeIssues.length,explicitOutstanding:[response?.received,response?.tableArrived,response?.power,response?.data,response?.hardware,response?.network,response?.access].includes('No')||Boolean(a.exceptionDetails&&!/^(none|n\/a|no issues)$/i.test(a.exceptionDetails)),siteStatus:text(row,config.siteStatus),decision:brain?text(brain,'color_mm8x8cxv'):'',decisionDate:brain?date(brain,'date_mm8x4m1e'):'',gate:text(row,config.readinessGate),blockReason:text(row,config.blockReason),responseApproved:response?.review==='Approved'&&[response?.received,response?.power,response?.data,response?.hardware,response?.network,response?.access,...(sfk?[response?.tableArrived]:[])].every(v=>v==='Yes')});
       sites.push({
         id:String(row.id),boardId:config.id,store,country:market,date:installDate,type:sfk?'SFK':'Standard',phase,
         dateStatus:text(row,config.dateStatus), outcome,attempted:good||issueHistory.length>0||ISSUE_PHASE.test(phase),hadIssue:issueHistory.length>0||ISSUE_PHASE.test(phase),
@@ -145,7 +149,7 @@ export function joinTracker(raw, health = {}) {
         network:response?.network || 'Unknown', access:response?.access || 'Unknown',
         floorplan:signup && text(signup,'hardware_placement')==='Done'?'Yes':brain && text(brain,'lookup_mm8vv96a')?'Yes':'Unknown',
         ia:links(row,config.ia).length?'Linked':'Unknown',
-        vm:notes,phone:text(row,config.feedback),action:text(row,config.action),owner:text(row,config.owner),due:date(row,config.due),
+        readiness,brainId:brain?String(brain.id):'',brainDate:brain?date(brain,'date_mm7f8hw6'):'',notesSource:notes?'Brian':legacyNotes?'Legacy BAU':'Brian',legacyVm:legacyNotes,vm:notes||legacyNotes,phone:text(row,config.feedback),action:brain?text(brain,'long_text_mm8xeb55'):text(row,config.action),owner:brain?text(brain,'text_mm8xen8a'):text(row,config.owner),due:brain?date(brain,'date_mm8xx6fr'):date(row,config.due),
         updatedAt:row.updated_at, responses:history, currentResponseId:response?.id||'',
         rootCause:[...new Set(issueHistory.map(i=>i.fault).filter(Boolean))].join(' / ')||'Unassigned',
         causeDetail:issueHistory.map(i=>i.scenario).filter(Boolean).join('\n'),

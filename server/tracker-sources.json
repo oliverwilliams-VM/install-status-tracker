@@ -13,7 +13,11 @@
       "feedback": "long_text_mm8xghhb",
       "action": "long_text_mm8x6chq",
       "owner": "text_mm8xxhrj",
-      "due": "date_mm8xah71"
+      "due": "date_mm8xah71",
+      "readinessGate": "color_mky7g77k",
+      "blockReason": "color_mky71fdt",
+      "siteStatus": "status9",
+      "pedStatus": "color"
     },
     "DE": {
       "id": "5757508504",
@@ -28,7 +32,11 @@
       "feedback": "long_text_mm8xrbca",
       "action": "long_text_mm8xqk8m",
       "owner": "text_mm8xpp8x",
-      "due": "date_mm8xvqp3"
+      "due": "date_mm8xvqp3",
+      "readinessGate": "color_mm206g05",
+      "blockReason": "color_mm20sh3x",
+      "siteStatus": "status__1",
+      "pedStatus": "color"
     },
     "NL": {
       "id": "5757397415",
@@ -43,7 +51,11 @@
       "feedback": "long_text_mm8xn18c",
       "action": "long_text_mm8xd8b2",
       "owner": "text_mm8xxrrr",
-      "due": "date_mm8x5w57"
+      "due": "date_mm8x5w57",
+      "readinessGate": "color_mm6vz8xv",
+      "blockReason": "color_mm6v2fch",
+      "siteStatus": "status1__1",
+      "pedStatus": "dup__of_wl_terminals__1"
     },
     "IE": {
       "id": "7519472262",
@@ -58,7 +70,9 @@
       "feedback": "long_text_mm8xg2ph",
       "action": "long_text_mm8x6g61",
       "owner": "text_mm8xtvpw",
-      "due": "date_mm8x8axh"
+      "due": "date_mm8x8axh",
+      "siteStatus": "status9__1",
+      "pedStatus": "status8__1"
     }
   },
   "responses": {
