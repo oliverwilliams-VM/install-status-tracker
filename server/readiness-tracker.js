@@ -168,6 +168,7 @@ export function joinTracker(raw, health = {}) {
   }
   const manualRows=(raw.manualEvidence||[]).flatMap(row=>{try{const a=JSON.parse(text(row,sources.manualEvidence.columns['Evidence JSON']));return [{...a,ledgerUrl:rowUrl(sources.manualEvidence.id,row.id)}];}catch{return [];}});
   const oldForms=(sources.legacyForms||[]).flatMap(board=>(raw[board.key]||[]).map(row=>({id:String(row.id),boardId:board.id,markets:board.markets,store:text(row,'short_textjluohkcj'),createdAt:row.created_at,formDate:date(row,'dateil43at5z'),ped:text(row,'single_selectdfcews6'),powerData:text(row,'single_selectyvczs4q'),comments:text(row,'long_textre3ommqp'),url:rowUrl(board.id,row.id)})));
+  oldForms.push(...manualRows.filter(a=>a.scope==='original-fze-response'&&a.form).map(a=>a.form));
   for(const site of sites)applyLegacyEvidence(site,manualRows,oldForms);
   return {sites,incidents,unlinkedIncidents:incidents.filter(i=>!i.bauItems.length),responsesCount:responses.length};
 }
