@@ -17,6 +17,7 @@ export function values(item) {
 }
 function text(item, id) {
   const c = values(item)[id];
+  try { const raw=JSON.parse(c?.value||'null'); if(typeof raw?.text==='string')return raw.text.trim(); } catch {}
   return String(c?.display_value ?? c?.text ?? '').trim();
 }
 function links(item, id) {
