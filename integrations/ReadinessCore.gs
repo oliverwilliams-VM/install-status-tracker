@@ -41,6 +41,11 @@ function validateAnswers(answers, installType, binding = {}) {
     if (!['yes', 'no', 'pending'].includes(answers[key])) throw Error('Answer every readiness question');
     out[key] = answers[key];
   }
+  for (const key of ['powerCompleted','dataCompleted']) {
+    const value=answers[key] || answers.powerData;
+    if(!['yes','no','pending'].includes(value))throw Error('Power and data answer required');
+    out[key]=value;
+  }
   out.table = installType === 'sfk' ? answers.table : 'na';
   if (installType === 'sfk' && !['yes', 'no', 'pending'].includes(out.table)) throw Error('SFK table answer required');
   out.tableDelivery = answers.tableDelivery ? dateOnly(answers.tableDelivery) : '';
@@ -114,8 +119,8 @@ function requiredReadinessChecks(a, type) {
     ...(a.storeType !== 'trading' ? ['openingDateKnown', 'openingDateConfirmed', 'worksComplete', ...(a.worksComplete !== 'yes' ? ['worksCompletionKnown'] : [])] : [])];
 }
 function readinessGaps(a, type, binding = {}) {
-  const labels = { team: 'Store team prepared', area: 'Installation area', powerData: 'Power and data installed', peds: 'PEDs received', floorplan: 'Floorplan confirmation', table: 'SFK table ordered', installDateConfirmed: 'Installation date confirmation', tableInStore: 'SFK table in store', tableAssembled: 'SFK table assembled and positioned', tableDeliveryKnown: 'Table delivery date unknown', worksCompletionKnown: 'Building works completion date unknown', powerTested: 'Power and data tested', pedQuantityConfirmed: 'Correct PED quantity', kitDelivered: 'Hardware delivered', kitComplete: 'Hardware complete', kitUndamaged: 'Hardware undamaged', kitSecure: 'Hardware securely stored', permits: 'Access permits', accessConfirmed: 'Access arrangements', networkOnline: 'Internet connection', networkPrepared: 'Network preparation', handoverAvailable: 'Contact available for handover', openingDateKnown: 'Opening/reopening date unknown', openingDateConfirmed: 'Opening/reopening date confirmation', worksComplete: 'Building works complete', goLiveDateKnown: 'Required go-live date unknown' };
-  const fields = ['team', 'area', 'powerData', 'peds', 'floorplan', ...(type === 'sfk' ? ['table'] : []), ...requiredReadinessChecks(a, type)];
+  const labels = { team: 'Store team prepared', area: 'Installation area', powerData: 'Power and data installed', powerCompleted: 'Power completed', dataCompleted: 'Data completed', peds: 'PEDs received', floorplan: 'Floorplan confirmation', table: 'SFK table ordered', installDateConfirmed: 'Installation date confirmation', tableInStore: 'SFK table in store', tableAssembled: 'SFK table assembled and positioned', tableDeliveryKnown: 'Table delivery date unknown', worksCompletionKnown: 'Building works completion date unknown', powerTested: 'Power and data tested', pedQuantityConfirmed: 'Correct PED quantity', kitDelivered: 'Hardware delivered', kitComplete: 'Hardware complete', kitUndamaged: 'Hardware undamaged', kitSecure: 'Hardware securely stored', permits: 'Access permits', accessConfirmed: 'Access arrangements', networkOnline: 'Internet connection', networkPrepared: 'Network preparation', handoverAvailable: 'Contact available for handover', openingDateKnown: 'Opening/reopening date unknown', openingDateConfirmed: 'Opening/reopening date confirmation', worksComplete: 'Building works complete', goLiveDateKnown: 'Required go-live date unknown' };
+  const fields = ['team', 'area', ...(a.powerCompleted ? ['powerCompleted'] : []), ...(a.dataCompleted ? ['dataCompleted'] : []), 'powerData', 'peds', 'floorplan', ...(type === 'sfk' ? ['table'] : []), ...requiredReadinessChecks(a, type)];
   const gaps = fields.filter(k => a[k] !== 'yes').map(k => labels[k]);
   if (type === 'sfk' && a.tableInStore === 'no' && a.tableDeliveryStatus === 'unknown') gaps.push('Table delivery date unknown');
   if (type === 'sfk' && a.tableOrderDate && a.tableDelivery && a.tableDelivery < a.tableOrderDate) gaps.push('Table delivery date precedes order date');
@@ -218,7 +223,7 @@ function equipmentTypeFromMonday(value) {
 
 function hasSfkReference(value) { return /\bsfk\b|small[\s-]+format[\s-]+kiosks?|\bsmall[\s-]+form[\s-]+factor\b/i.test(Array.isArray(value) ? value.join(' ') : String(value || '')); }
 function quickGroups(projectType) { return [
- {key:'powerNetwork',fields:['powerData','powerTested','networkOnline','networkPrepared']},
+ {key:'powerNetwork',fields:['powerData','powerCompleted','dataCompleted','powerTested','networkOnline','networkPrepared']},
  {key:'hardwareReady',fields:['kitDelivered','kitComplete','kitUndamaged','kitSecure']},
  {key:'terminalsReady',fields:['peds','pedQuantityConfirmed']},
  {key:'siteReady',fields:['floorplan','area',...(projectType!=='trading'?['worksComplete']:[])]},
@@ -226,7 +231,7 @@ function quickGroups(projectType) { return [
 ]; }
 function quickDetailFields(group,a) {return group.fields.filter(k=>!((['kitComplete','kitUndamaged','kitSecure'].includes(k)&&a.kitDelivered!=='yes')||(k==='pedQuantityConfirmed'&&a.peds!=='yes')||(k==='powerTested'&&a.powerData!=='yes')));}
 function expandQuickResponse(input,binding) {
- const a={...input};
+ const a={...input,powerCompleted:input.powerCompleted||input.powerData,dataCompleted:input.dataCompleted||input.powerData};
  for(const g of quickGroups(binding.projectType)){const value=a.quickConfirmations?.[g.key];if(!['yes','no','pending'].includes(value))throw Error('Answer each readiness confirmation');if(value==='yes')for(const k of g.fields)a[k]='yes';else {for(const k of quickDetailFields(g,a))if(!['yes','no','pending'].includes(a[k]))throw Error('Identify outstanding preparation');if(g.fields.every(k=>a[k]==='yes'))throw Error('Overall confirmation conflicts with detailed answers');}}
  if(a.quickConfirmations.accessHandover==='yes')a.accessInstructions='No access exceptions reported';
  if(!['yes','no'].includes(a.otherIssues))throw Error('Other issues answer required');if(a.otherIssues==='no')a.comments='None';
@@ -246,9 +251,11 @@ function quickNeedsActions(a,b) {
  return Boolean((a.goLiveDate&&a.goLiveDate<b.installDate)||(a.openingDate&&a.openingDate<b.installDate)||(a.tableInStore==='no'&&a.tableDelivery&&a.tableDelivery>=b.installDate));
 }
 
+
 // Country-native readiness questions. No service commitment beyond installation and handover.
 const EXTRA_COPY = {
  en: {
+  powerCompleted:'Is the power work complete at the kiosk positions?', dataCompleted:'Is the data cabling complete at the kiosk positions?',
   quickChecksTitle:'Five quick readiness checks', quickChecksHelp:'Confirm each statement. Extra questions appear only where something is not ready.', powerNetwork:'Power/data is installed and tested; internet and required network preparation are ready.', hardwareReady:'Hardware is at the correct restaurant, complete, undamaged and securely stored ready for installation.', terminalsReady:'The correct number of payment terminals has arrived.', siteReady:'The floorplan is correct, the installation area is clear and any building works are complete.', accessHandover:'The team is aware; access, keys and any permits are arranged, with a contact available for handover.', evidenceDelivery:'How will you provide the required photos?', now:'Attach photos now', shared:'Already shared with the installation team', later:'Provide photos separately', otherIssues:'Is there anything else the installation team needs to know?', quickEvidenceHelp:'You can send this update without uploading photos now. Missing or unverified evidence remains visible for VM follow-up.',
   tableSection:'SFK table readiness', tableApplies:'Required for every SFK installation: NRO, Remodel and existing trading restaurants.',
   assignedProjectType:'Project type recorded by the installation team', assignedProjectHelp:'This is pre-filled from Monday. You do not need to choose your project type.', wrongProject:'This project type is not correct — contact the team', wrongProjectReason:'Tell the installation team what is incorrect', sendProjectIssue:'Send project-type correction request', projectIssueSaved:'The project type has been flagged to the installation team. Readiness submission and reminders are on hold until the team checks the record.', projectIssueError:'We could not record your request. Please contact the installation team.', projectIssueRequired:'Describe what is incorrect (at least 5 characters).',
@@ -265,6 +272,7 @@ const EXTRA_COPY = {
   tablePhoto:'Table and installation area', powerPhoto:'Power and data', pedsPhoto:'Payment terminals', kitPhoto:'Hardware / missing or damaged items', photoHint:'One JPEG or PNG per category, maximum 700 KB each. Required evidence remains a visible gap until supplied.', photosError:'Use a JPEG/PNG photo of 700 KB or less.', saveError:'Please check the required answers, contact details and outstanding-work details.', reviewPending:'Your response is saved for the installation team to review. Submission is not approval to proceed.'
  },
  nl: {
+  powerCompleted:'Zijn de stroomvoorzieningen op de kioskposities gereed?', dataCompleted:'Is de databekabeling op de kioskposities gereed?',
   quickChecksTitle:'Vijf korte controles', quickChecksHelp:'Bevestig elke verklaring. Extra vragen verschijnen alleen als iets nog niet gereed is.', powerNetwork:'Stroom/data is aangelegd en getest; internet en netwerkvoorbereiding zijn gereed.', hardwareReady:'De hardware is op het juiste restaurantadres, compleet, onbeschadigd en veilig opgeslagen voor installatie.', terminalsReady:'Het juiste aantal betaalterminals is aangekomen.', siteReady:'De plattegrond klopt, de installatiezone is vrij en eventuele bouwwerkzaamheden zijn afgerond.', accessHandover:'Het team is geïnformeerd; toegang, sleutels en vergunningen zijn geregeld en er is een contactpersoon voor de overdracht.', evidenceDelivery:'Hoe levert u de vereiste foto’s aan?', now:'Nu foto’s toevoegen', shared:'Al gedeeld met het installatieteam', later:'Foto’s apart aanleveren', otherIssues:'Moet het installatieteam nog iets anders weten?', quickEvidenceHelp:'U kunt deze update versturen zonder nu foto’s te uploaden. Ontbrekende of niet gecontroleerde foto’s blijven zichtbaar voor opvolging door VM.',
   tableSection:'Gereedheid van de SFK-tafel', tableApplies:'Vereist voor elke SFK-installatie: nieuw restaurant, verbouwing en bestaand geopend restaurant.',
   assignedProjectType:'Projecttype geregistreerd door het installatieteam', assignedProjectHelp:'Dit is vooraf ingevuld vanuit Monday. U hoeft uw projecttype niet te kiezen.', wrongProject:'Dit projecttype is niet correct — neem contact op met het team', wrongProjectReason:'Vertel het installatieteam wat niet correct is', sendProjectIssue:'Correctieverzoek voor projecttype versturen', projectIssueSaved:'Het projecttype is gemeld bij het installatieteam. Gereedheidsinzending en herinneringen zijn gepauzeerd totdat het team de registratie heeft gecontroleerd.', projectIssueError:'Uw verzoek kon niet worden opgeslagen. Neem contact op met het installatieteam.', projectIssueRequired:'Beschrijf wat niet correct is (minimaal 5 tekens).',
@@ -281,6 +289,7 @@ const EXTRA_COPY = {
   tablePhoto:'Tafel en installatiezone', powerPhoto:'Stroom en data', pedsPhoto:'Betaalterminals', kitPhoto:'Hardware / ontbrekende of beschadigde onderdelen', photoHint:'Eén JPEG- of PNG-foto per categorie, maximaal 700 KB. Ontbrekende vereiste foto’s blijven als open punt zichtbaar.', photosError:'Gebruik een JPEG- of PNG-foto van maximaal 700 KB.', saveError:'Controleer de verplichte antwoorden, contactgegevens en openstaande punten.', reviewPending:'Uw reactie is opgeslagen ter beoordeling door het installatieteam. Het versturen is geen goedkeuring om door te gaan.'
  },
  de: {
+  powerCompleted:'Sind die Stromanschlüsse an den Kioskpositionen fertiggestellt?', dataCompleted:'Ist die Datenverkabelung an den Kioskpositionen fertiggestellt?',
   quickChecksTitle:'Fünf kurze Bereitschaftsprüfungen', quickChecksHelp:'Bestätigen Sie jede Aussage. Zusätzliche Fragen erscheinen nur, wenn etwas noch nicht bereit ist.', powerNetwork:'Strom/Daten sind installiert und getestet; Internet und Netzwerkvorbereitung sind bereit.', hardwareReady:'Die Hardware ist am richtigen Restaurant, vollständig, unbeschädigt und sicher für die Installation gelagert.', terminalsReady:'Die richtige Anzahl an Zahlungsterminals ist angekommen.', siteReady:'Der Grundriss ist korrekt, der Installationsbereich ist frei und etwaige Bauarbeiten sind abgeschlossen.', accessHandover:'Das Team ist informiert; Zugang, Schlüssel und Genehmigungen sind organisiert und eine Kontaktperson ist für die Übergabe verfügbar.', evidenceDelivery:'Wie stellen Sie die erforderlichen Fotos bereit?', now:'Fotos jetzt anhängen', shared:'Bereits mit dem Installationsteam geteilt', later:'Fotos separat bereitstellen', otherIssues:'Muss das Installationsteam noch etwas wissen?', quickEvidenceHelp:'Sie können diese Meldung ohne sofortigen Foto-Upload absenden. Fehlende oder ungeprüfte Fotos bleiben zur Nachverfolgung durch VM sichtbar.',
   tableSection:'Bereitschaft des SFK-Tisches', tableApplies:'Für jede SFK-Installation erforderlich: Neueröffnung, Umbau und bestehendes geöffnetes Restaurant.',
   assignedProjectType:'Vom Installationsteam erfasster Projekttyp', assignedProjectHelp:'Diese Angabe wird aus Monday übernommen. Sie müssen den Projekttyp nicht auswählen.', wrongProject:'Dieser Projekttyp ist nicht korrekt — Team kontaktieren', wrongProjectReason:'Teilen Sie dem Installationsteam mit, was nicht korrekt ist', sendProjectIssue:'Korrekturanfrage zum Projekttyp senden', projectIssueSaved:'Der Projekttyp wurde dem Installationsteam gemeldet. Bereitschaftsmeldungen und Erinnerungen sind pausiert, bis das Team den Datensatz geprüft hat.', projectIssueError:'Ihre Anfrage konnte nicht gespeichert werden. Bitte kontaktieren Sie das Installationsteam.', projectIssueRequired:'Beschreiben Sie die falsche Angabe (mindestens 5 Zeichen).',
@@ -302,6 +311,7 @@ function dateFieldCopy(copy, storeType) {
   const prefix = storeType === 'remodel' ? 'reopening' : 'nroOpening';
   return { ...copy, openingDateKnown: copy[prefix + 'DateKnown'], openingDate: copy[prefix + 'Date'], openingDateConfirmed: copy[prefix + 'DateConfirmed'], sourceOpening: copy[storeType === 'remodel' ? 'reopeningSourceOpening' : 'nroSourceOpening'] };
 }
+
 
 const COPY = {
   en: {
@@ -336,6 +346,7 @@ function emailPreview(record, plan, url) {
   const html = `<div style="font-family:Arial,sans-serif;color:#132f39;max-width:600px;margin:auto;padding:32px"><p style="font-weight:bold">SUBWAY × VITA MOJO</p><h1 style="font-size:24px">${escape(c.mailSubject)}</h1><p>${escape(message)}</p><p><strong>${escape(record.binding.store)}</strong> · ${escape(date)}</p><p style="margin:32px 0"><a style="background:#ffd54a;color:#132f39;padding:16px 24px;border-radius:6px;font-weight:bold" href="${escape(url)}">${escape(c.mailAction)}</a></p><p>${escape(c.mailClose)}</p><p>${escape(c.signature)}</p><p style="font-size:12px;word-break:break-all">${escape(url)}</p></div>`;
   return { subject, text, html, to: plan.to || record.fzeEmail, cc: plan.copyMfp ? record.mfpEmail : '' };
 }
+
 
 function reduce(previous, c, now) {
  const at = new Date(now).toISOString();
@@ -415,3 +426,4 @@ function reduce(previous, c, now) {
  }
  throw Error('Unsupported operation');
 }
+

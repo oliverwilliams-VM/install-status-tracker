@@ -39,6 +39,11 @@ export function validateAnswers(answers, installType, binding = {}) {
     if (!['yes', 'no', 'pending'].includes(answers[key])) throw Error('Answer every readiness question');
     out[key] = answers[key];
   }
+  for (const key of ['powerCompleted','dataCompleted']) {
+    const value=answers[key] || answers.powerData;
+    if(!['yes','no','pending'].includes(value))throw Error('Power and data answer required');
+    out[key]=value;
+  }
   out.table = installType === 'sfk' ? answers.table : 'na';
   if (installType === 'sfk' && !['yes', 'no', 'pending'].includes(out.table)) throw Error('SFK table answer required');
   out.tableDelivery = answers.tableDelivery ? dateOnly(answers.tableDelivery) : '';
@@ -112,8 +117,8 @@ export function requiredReadinessChecks(a, type) {
     ...(a.storeType !== 'trading' ? ['openingDateKnown', 'openingDateConfirmed', 'worksComplete', ...(a.worksComplete !== 'yes' ? ['worksCompletionKnown'] : [])] : [])];
 }
 export function readinessGaps(a, type, binding = {}) {
-  const labels = { team: 'Store team prepared', area: 'Installation area', powerData: 'Power and data installed', peds: 'PEDs received', floorplan: 'Floorplan confirmation', table: 'SFK table ordered', installDateConfirmed: 'Installation date confirmation', tableInStore: 'SFK table in store', tableAssembled: 'SFK table assembled and positioned', tableDeliveryKnown: 'Table delivery date unknown', worksCompletionKnown: 'Building works completion date unknown', powerTested: 'Power and data tested', pedQuantityConfirmed: 'Correct PED quantity', kitDelivered: 'Hardware delivered', kitComplete: 'Hardware complete', kitUndamaged: 'Hardware undamaged', kitSecure: 'Hardware securely stored', permits: 'Access permits', accessConfirmed: 'Access arrangements', networkOnline: 'Internet connection', networkPrepared: 'Network preparation', handoverAvailable: 'Contact available for handover', openingDateKnown: 'Opening/reopening date unknown', openingDateConfirmed: 'Opening/reopening date confirmation', worksComplete: 'Building works complete', goLiveDateKnown: 'Required go-live date unknown' };
-  const fields = ['team', 'area', 'powerData', 'peds', 'floorplan', ...(type === 'sfk' ? ['table'] : []), ...requiredReadinessChecks(a, type)];
+  const labels = { team: 'Store team prepared', area: 'Installation area', powerData: 'Power and data installed', powerCompleted: 'Power completed', dataCompleted: 'Data completed', peds: 'PEDs received', floorplan: 'Floorplan confirmation', table: 'SFK table ordered', installDateConfirmed: 'Installation date confirmation', tableInStore: 'SFK table in store', tableAssembled: 'SFK table assembled and positioned', tableDeliveryKnown: 'Table delivery date unknown', worksCompletionKnown: 'Building works completion date unknown', powerTested: 'Power and data tested', pedQuantityConfirmed: 'Correct PED quantity', kitDelivered: 'Hardware delivered', kitComplete: 'Hardware complete', kitUndamaged: 'Hardware undamaged', kitSecure: 'Hardware securely stored', permits: 'Access permits', accessConfirmed: 'Access arrangements', networkOnline: 'Internet connection', networkPrepared: 'Network preparation', handoverAvailable: 'Contact available for handover', openingDateKnown: 'Opening/reopening date unknown', openingDateConfirmed: 'Opening/reopening date confirmation', worksComplete: 'Building works complete', goLiveDateKnown: 'Required go-live date unknown' };
+  const fields = ['team', 'area', ...(a.powerCompleted ? ['powerCompleted'] : []), ...(a.dataCompleted ? ['dataCompleted'] : []), 'powerData', 'peds', 'floorplan', ...(type === 'sfk' ? ['table'] : []), ...requiredReadinessChecks(a, type)];
   const gaps = fields.filter(k => a[k] !== 'yes').map(k => labels[k]);
   if (type === 'sfk' && a.tableInStore === 'no' && a.tableDeliveryStatus === 'unknown') gaps.push('Table delivery date unknown');
   if (type === 'sfk' && a.tableOrderDate && a.tableDelivery && a.tableDelivery < a.tableOrderDate) gaps.push('Table delivery date precedes order date');
@@ -216,7 +221,7 @@ export function equipmentTypeFromMonday(value) {
 
 export function hasSfkReference(value) { return /\bsfk\b|small[\s-]+format[\s-]+kiosks?|\bsmall[\s-]+form[\s-]+factor\b/i.test(Array.isArray(value) ? value.join(' ') : String(value || '')); }
 export function quickGroups(projectType) { return [
- {key:'powerNetwork',fields:['powerData','powerTested','networkOnline','networkPrepared']},
+ {key:'powerNetwork',fields:['powerData','powerCompleted','dataCompleted','powerTested','networkOnline','networkPrepared']},
  {key:'hardwareReady',fields:['kitDelivered','kitComplete','kitUndamaged','kitSecure']},
  {key:'terminalsReady',fields:['peds','pedQuantityConfirmed']},
  {key:'siteReady',fields:['floorplan','area',...(projectType!=='trading'?['worksComplete']:[])]},
@@ -224,7 +229,7 @@ export function quickGroups(projectType) { return [
 ]; }
 export function quickDetailFields(group,a) {return group.fields.filter(k=>!((['kitComplete','kitUndamaged','kitSecure'].includes(k)&&a.kitDelivered!=='yes')||(k==='pedQuantityConfirmed'&&a.peds!=='yes')||(k==='powerTested'&&a.powerData!=='yes')));}
 export function expandQuickResponse(input,binding) {
- const a={...input};
+ const a={...input,powerCompleted:input.powerCompleted||input.powerData,dataCompleted:input.dataCompleted||input.powerData};
  for(const g of quickGroups(binding.projectType)){const value=a.quickConfirmations?.[g.key];if(!['yes','no','pending'].includes(value))throw Error('Answer each readiness confirmation');if(value==='yes')for(const k of g.fields)a[k]='yes';else {for(const k of quickDetailFields(g,a))if(!['yes','no','pending'].includes(a[k]))throw Error('Identify outstanding preparation');if(g.fields.every(k=>a[k]==='yes'))throw Error('Overall confirmation conflicts with detailed answers');}}
  if(a.quickConfirmations.accessHandover==='yes')a.accessInstructions='No access exceptions reported';
  if(!['yes','no'].includes(a.otherIssues))throw Error('Other issues answer required');if(a.otherIssues==='no')a.comments='None';
@@ -243,3 +248,4 @@ export function quickNeedsActions(a,b) {
  if(checks.some(k=>a[k]==='no'||a[k]==='pending'))return true;
  return Boolean((a.goLiveDate&&a.goLiveDate<b.installDate)||(a.openingDate&&a.openingDate<b.installDate)||(a.tableInStore==='no'&&a.tableDelivery&&a.tableDelivery>=b.installDate));
 }
+

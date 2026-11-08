@@ -79,17 +79,14 @@ function RD_submit_(previous,c,save,p){
  var archiveFile=archiveFolder.createFile(r.binding.id+'-'+c.submissionId+'.json',JSON.stringify(archive),'application/json');
  if(archiveFile.getBlob().getDataAsString()!==JSON.stringify(archive))throw Error('Archive verification failed');
  r.pendingSubmission.archiveId=archiveFile.getId();r.pendingSubmission.files=names;r.pendingSubmission.phase='monday-started';save(r);
- var country=market(r.binding.country),board={UK:'18379251681',IE:'18379251681',DE:'18391075175',NL:'18396748434'}[country],a=r.pendingSubmission.answers;
- var labels={UK:{yes:'Yes',no:'No',pending:'No'},IE:{yes:'Yes',no:'No',pending:'No'},DE:{yes:'Ja',no:'Nein',pending:'Nein'},NL:{yes:'Ja',no:'Nee',pending:'Nee'}}[country];
- var columns={short_textjluohkcj:r.binding.store,dateil43at5z:{date:r.pendingSubmission.at.slice(0,10)},short_text2q1abstd:a.name,long_textre3ommqp:{text:a.comments}};
- ['team','area','powerData','peds'].forEach(function(k,i){var ids=['single_selectxvq1oc5','single_selectfmp3ddo','single_selectyvczs4q','single_selectdfcews6'];var label=labels[a[k]];if(country==='DE'&&k==='peds'&&a[k]!=='yes')label='No';if(country==='NL'&&(k==='powerData'||k==='peds')&&a[k]==='yes')label='Jaa';columns[ids[i]]={label:label};});
- var tableId={UK:'single_select9i5gdtk',IE:'single_select9i5gdtk',DE:'single_selectztongf2',NL:'single_selectojxswdf'}[country];
- if(r.binding.installType==='sfk')columns[tableId]={label:country==='NL'&&a.table==='yes'?'Jaa':labels[a.table]};
- var floorId={UK:'single_selecteeh7rio',IE:'single_selecteeh7rio',DE:'single_selectfc2hq66',NL:'single_selectabkgsdx'}[country];columns[floorId]={label:labels[a.floorplan]};
+ var board='18438991769',columns=RD_responseColumns_(r,archive);
  var result=RD_monday_('mutation($b:ID!,$n:String!,$v:JSON!){create_item(board_id:$b,item_name:$n,column_values:$v){id}}',{b:board,n:r.binding.store,v:JSON.stringify(columns)},p),itemId=result.create_item.id;
  r.pendingSubmission.mondayItemId=itemId;r.pendingSubmission.phase='metadata-started';save(r);
+ var readback=RD_monday_('query($ids:[ID!]!,$cols:[String!]){items(ids:$ids){board{id} column_values(ids:$cols){id text}}}',{ids:[String(itemId)],cols:[RD_RESPONSE_COLUMNS_['Submission ID'],RD_RESPONSE_COLUMNS_['Response Digest']]},p).items[0];
+ var verified={};if(readback)readback.column_values.forEach(function(v){verified[v.id]=v.text;});
+ if(!readback||String(readback.board.id)!==board||verified[RD_RESPONSE_COLUMNS_['Submission ID']]!==c.submissionId||verified[RD_RESPONSE_COLUMNS_['Response Digest']]!==c.digest)throw Error('Response board readback unconfirmed');
  // Exact binding/canonical answers retained in an update, separate from visible FZE comments.
- RD_monday_('mutation($i:ID!,$body:String!){create_update(item_id:$i,body:$body){id}}',{i:itemId,body:'READINESS_PORTAL_V1\n'+JSON.stringify({binding:r.binding,revision:r.revision,submissionId:c.submissionId,at:archive.at,answers:a,acknowledgement:archive.acknowledgement,archiveId:archiveFile.getId(),files:names})},p);
+ RD_monday_('mutation($i:ID!,$body:String!){create_update(item_id:$i,body:$body){id}}',{i:itemId,body:'READINESS_PORTAL_V1\n'+JSON.stringify({binding:r.binding,revision:r.revision,submissionId:c.submissionId,at:archive.at,answers:archive.answers,acknowledgement:archive.acknowledgement,archiveId:archiveFile.getId(),files:names})},p);
  var committed=reduce(r,Object.assign({},c,{operation:'commitSubmission',archiveId:archiveFile.getId(),mondayItemId:itemId,files:names}),Date.now());save(committed.record);return committed.result;
 }
 /** Call from the existing reviewed readiness sender. No trigger or new sender here.
@@ -140,4 +137,31 @@ function RD_assertProjectCurrent_(record,p){
  var proof=RD_projectEvidence_(item,p);
  if(proof.projectType!==record.binding.projectType||proof.installType!==record.binding.installType)throw Error('Project or equipment context changed; replace invitation');
  if((record.sourceReference.projectEvidence||{}).signupItemId&&record.sourceReference.projectEvidence.signupItemId!==proof.signupItemId)throw Error('Linked Sign Up store changed');
+}
+
+
+var RD_RESPONSE_COLUMNS_={"Name": "name", "Table Order Date": "date_mm8xa33p", "Form Version": "text_mm8x87v5", "Install Date": "date_mm8x392s", "Table Order Reference": "text_mm8xdy45", "BAU Board ID": "text_mm8xc23m", "Table Arrived": "text_mm8x8yq0", "PEDs Received": "text_mm8xt0r4", "Contact Email": "email_mm8xkb3f", "FZE Comments Original": "long_text_mm8xy9a6", "Power Completed": "text_mm8xptrh", "Market": "text_mm8xbd76", "Hardware Received": "text_mm8xgjx5", "Context Revision": "numeric_mm8xh9d2", "Project Type": "text_mm8xy2mw", "Network Ready": "text_mm8xt2fj", "Data Completed": "text_mm8xk980", "FZE Comments English": "long_text_mm8xc3a", "VM Review": "text_mm8xz749", "Table ETA": "date_mm8xxeqr", "Brain Item ID": "text_mm8x3ngr", "Store Number": "text_mm8x7mvx", "Hardware Complete": "text_mm8x8d80", "Submission ID": "text_mm8xd75c", "Answers JSON": "long_text_mm8xxgct", "BAU Item ID": "text_mm8xter7", "Kiosk Format": "text_mm8x1en9", "Table Ordered": "text_mm8xmw4g", "Translation State": "text_mm8x72qx", "Submitted At UTC": "text_mm8xm7v9", "Response Language": "text_mm8xpnqg", "Hardware Undamaged": "text_mm8xer9j", "Evidence": "file_mm8xfw3h", "Response Digest": "text_mm8xba0p", "Contact Name": "text_mm8x4hms", "Access Confirmed": "text_mm8xyw2y"};
+function RD_responseColumns_(r,archive){
+ var a=archive.answers,c=RD_RESPONSE_COLUMNS_,m=market(r.binding.country),out={};
+ function set(title,value){if(value!==undefined&&value!==null&&value!=='')out[c[title]]=value;}
+ function answer(v){return v==='yes'?'Yes':v==='no'?'No':v==='na'?'Not required':'Unknown';}
+ function day(title,value){if(value)set(title,{date:dateOnly(value)});}
+ set('Submission ID',archive.submissionId);set('Market',m);set('Store Number',r.binding.store);
+ set('BAU Board ID',r.binding.boardId);set('BAU Item ID',r.binding.itemId);
+ set('Brain Item ID',String((r.sourceReference||{}).brainItemId||''));
+ day('Install Date',r.binding.installDate);set('Submitted At UTC',archive.at);set('Context Revision',r.revision);
+ set('Form Version',String(a.schemaVersion||1));set('Contact Name',a.name);set('Project Type',r.binding.projectType);
+ set('Kiosk Format',r.binding.installType==='sfk'?'SFK':'Other');
+ set('Table Ordered',answer(r.binding.installType==='sfk'?a.table:'na'));
+ set('Table Arrived',answer(r.binding.installType==='sfk'?a.tableInStore:'na'));
+ day('Table Order Date',a.tableOrderDate);day('Table ETA',a.tableDelivery);
+ set('PEDs Received',answer(a.peds));set('Power Completed',answer(a.powerCompleted||a.powerData));
+ set('Data Completed',answer(a.dataCompleted||a.powerData));set('Hardware Received',answer(a.kitDelivered));
+ set('Hardware Complete',answer(a.kitComplete));set('Hardware Undamaged',answer(a.kitUndamaged));
+ set('Network Ready',answer(a.networkOnline));set('Access Confirmed',answer(a.accessConfirmed));
+ set('FZE Comments Original',{text:a.comments||''});
+ if(m==='UK'||m==='IE')set('FZE Comments English',{text:a.comments||''});
+ set('Response Language',m==='DE'?'de':m==='NL'?'nl':'en');set('Translation State',m==='DE'||m==='NL'?'Pending':'Original is English');
+ set('Answers JSON',{text:JSON.stringify(a)});set('Response Digest',archive.digest);set('VM Review','Pending');
+ return out;
 }
