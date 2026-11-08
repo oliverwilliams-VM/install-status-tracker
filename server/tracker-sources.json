@@ -128,5 +128,42 @@
       "bau": "board_relation_mm8aj15j",
       "evidence": "file_mm8azbxp"
     }
-  }
+  },
+  "manualEvidence": {
+    "id": "18439004804",
+    "columns": {
+      "Name": "name",
+      "Import Key": "text_mm8x9qgs",
+      "Store Number": "text_mm8x4vw9",
+      "Market": "text_mm8x3yrs",
+      "Install Date": "date_mm8x2vgr",
+      "Evidence JSON": "long_text_mm8xnbrv",
+      "Source": "link_mm8xf1sg",
+      "Review Flags": "long_text_mm8xjkas"
+    }
+  },
+  "legacyForms": [
+    {
+      "key": "legacyUKI",
+      "id": "18379251681",
+      "markets": [
+        "UK",
+        "IE"
+      ]
+    },
+    {
+      "key": "legacyDE",
+      "id": "18391075175",
+      "markets": [
+        "DE"
+      ]
+    },
+    {
+      "key": "legacyNL",
+      "id": "18396748434",
+      "markets": [
+        "NL"
+      ]
+    }
+  ]
 }

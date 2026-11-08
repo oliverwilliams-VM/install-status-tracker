@@ -1,6 +1,7 @@
 import sources from './tracker-sources.json' with { type: 'json' };
 
 import {reconcilePed} from './ped-legacy.js';
+import {applyLegacyEvidence} from './legacy-readiness.js';
 import {installReadiness} from './install-readiness.js';
 
 const BRAIN_ID = '18432365825';
@@ -56,7 +57,7 @@ export async function mondayRead(query, variables, {token, fetchImpl = fetch}) {
   return result.data;
 }
 export async function readBoard(board, columns, options) {
-  const fields = 'id name updated_at group{id title} column_values(ids:$columns){id text value ... on MirrorValue{display_value} ... on BoardRelationValue{linked_item_ids}}';
+  const fields = 'id name created_at updated_at group{id title} column_values(ids:$columns){id text value ... on MirrorValue{display_value} ... on BoardRelationValue{linked_item_ids}}';
   const query = `query($board:ID!,$columns:[String!]){boards(ids:[$board]){items_page(limit:500){cursor items{${fields}}}}}`;
   const first = await mondayRead(query,{board,columns},options);
   if (!first.boards?.[0]?.items_page) throw Error('Monday board is not accessible');
@@ -154,7 +155,7 @@ export function joinTracker(raw, health = {}) {
         floorplan:signup && text(signup,'hardware_placement')==='Done'?'Yes':brain && text(brain,'lookup_mm8vv96a')?'Yes':'Unknown',
         ia:links(row,config.ia).length?'Linked':'Unknown',
         readiness,brainId:brain?String(brain.id):'',brainDate:brain?date(brain,'date_mm7f8hw6'):'',notesSource:notes?'Brian':legacyNotes?'Legacy BAU':'Brian',legacyVm:legacyNotes,vm:notes||legacyNotes,phone:text(row,config.feedback),action:brain?text(brain,'long_text_mm8xeb55'):text(row,config.action),owner:brain?text(brain,'text_mm8xen8a'):text(row,config.owner),due:brain?date(brain,'date_mm8xx6fr'):date(row,config.due),
-        updatedAt:row.updated_at, responses:history, currentResponseId:response?.id||'',
+        createdAt:row.created_at,updatedAt:row.updated_at, responses:history, currentResponseId:response?.id||'',
         rootCause:[...new Set(issueHistory.map(i=>i.fault).filter(Boolean))].join(' / ')||'Unassigned',
         causeDetail:issueHistory.map(i=>i.scenario).filter(Boolean).join('\n'),
         outstanding:activeIssues.map(i=>i.scenario||i.outcome||'Incident details required').concat(a.exceptionDetails && !/^(none|n\/a|no issues)$/i.test(a.exceptionDetails)?[a.exceptionDetails]:[]).join('\n'),
@@ -164,6 +165,9 @@ export function joinTracker(raw, health = {}) {
       });
     }
   }
+  const manualRows=(raw.manualEvidence||[]).flatMap(row=>{try{const a=JSON.parse(text(row,sources.manualEvidence.columns['Evidence JSON']));return [{...a,ledgerUrl:rowUrl(sources.manualEvidence.id,row.id)}];}catch{return [];}});
+  const oldForms=(sources.legacyForms||[]).flatMap(board=>(raw[board.key]||[]).map(row=>({id:String(row.id),boardId:board.id,markets:board.markets,store:text(row,'short_textjluohkcj'),createdAt:row.created_at,formDate:date(row,'dateil43at5z'),ped:text(row,'single_selectdfcews6'),powerData:text(row,'single_selectyvczs4q'),comments:text(row,'long_textre3ommqp'),url:rowUrl(board.id,row.id)})));
+  for(const site of sites)applyLegacyEvidence(site,manualRows,oldForms);
   return {sites,incidents,unlinkedIncidents:incidents.filter(i=>!i.bauItems.length),responsesCount:responses.length};
 }
 export async function loadTracker({token,fetchImpl=fetch}={}) {
@@ -172,7 +176,7 @@ export async function loadTracker({token,fetchImpl=fetch}={}) {
   const specs = [...Object.entries(sources.countries).map(([key,b])=>[key,b.id,fieldList(b)]),
     ['brain',BRAIN_ID,BRAIN_COLUMNS],['signup','5678025992',SIGNUP_COLUMNS],
     ['responses',sources.responses.id,Object.values(sources.responses.columns).filter(c=>c!=='name')],
-    ['incidents',sources.incidents.id,Object.values(sources.incidents.columns)]];
+    ['incidents',sources.incidents.id,Object.values(sources.incidents.columns)],['manualEvidence',sources.manualEvidence.id,Object.values(sources.manualEvidence.columns).filter(c=>c!=='name')],...sources.legacyForms.map(b=>[b.key,b.id,['short_textjluohkcj','dateil43at5z','single_selectdfcews6','single_selectyvczs4q','long_textre3ommqp']])];
   const results = await Promise.allSettled(specs.map(async ([key,id,columns])=>[key,await readBoard(id,columns,options)]));
   const raw = {}, health = {};
   results.forEach((result,i)=>{const key=specs[i][0];health[key]={ok:result.status==='fulfilled',at:new Date().toISOString()};if(result.status==='fulfilled')raw[key]=result.value[1];else health[key].message='Source unavailable. Refresh or open Monday to verify.';});
