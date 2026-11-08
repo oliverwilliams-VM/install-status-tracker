@@ -1,0 +1,12 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {joinTracker,faultGroup} from '../server/readiness-tracker.js';
+import sources from '../server/tracker-sources.json' with {type:'json'};
+const cell=(id,text,value=null,linked_item_ids=[])=>({id,text,value:JSON.stringify(value),linked_item_ids});
+const c=sources.countries.UK, rc=sources.responses.columns;
+const site={id:'test-job',name:'99999',column_values:[cell(c.date,'',{date:'2026-11-16'}),cell(c.format,'SFK'),cell(c.phase,'Installed'),cell(c.signup,'',null,['signup'])]};
+const response=(date)=>({id:'response',name:'99999',column_values:[...Object.entries({'Market':'UK','Store Number':'99999','BAU Board ID':c.id,'BAU Item ID':'test-job','Submitted At UTC':'2026-11-08T12:00:00Z','PEDs Received':'Yes','Power Completed':'Yes','Data Completed':'No'}).map(([k,v])=>cell(rc[k],v)),cell(rc['Install Date'],'',{date})]});
+test('stale responses stay in history and cannot qualify rescheduled work',()=>{const result=joinTracker({UK:[site],responses:[response('2026-11-09')]});assert.equal(result.sites[0].received,'Unknown');assert.equal(result.sites[0].responses.length,1);});
+test('current response keeps power and data separate',()=>{const result=joinTracker({UK:[site],responses:[response('2026-11-16')]});assert.equal(result.sites[0].power,'Yes');assert.equal(result.sites[0].data,'No');});
+test('ambiguous Brian links never supply a signed or ordered milestone',()=>{const brain=id=>({id,column_values:[cell('board_relation_mm7s293s','',null,['signup']),cell('boolean_mm8qvyqt','',{checked:true})]});const result=joinTracker({UK:[site],brain:[brain('one'),brain('two')]});assert.equal(result.sites[0].signed,'Unknown');assert.equal(result.sites[0].sourceWarnings.length,1);});
+test('incident reporting collapses VM suppliers while preserving the three owners',()=>{for(const fault of ['Vita Mojo','Apex','Supplier','Supplier / Apex','P&D contractor'])assert.equal(faultGroup(fault),'VM');assert.equal(faultGroup('Store'),'FZE');assert.equal(faultGroup('Subway'),'Subway');assert.equal(faultGroup(''),'Unassigned');});
