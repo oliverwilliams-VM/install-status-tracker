@@ -1,9 +1,10 @@
 import sources from './tracker-sources.json' with { type: 'json' };
 
+import {reconcilePed} from './ped-legacy.js';
 import {installReadiness} from './install-readiness.js';
 
 const BRAIN_ID = '18432365825';
-const BRAIN_COLUMNS = ['board_relation_mm7s293s','country_mm7fphac','boolean_mm8q7cvs','boolean_mm8qvyqt','boolean_mm8qa0fn','color_mm8daknj','lookup_mm8vv96a','color_mm7h7hf1','long_text_mm7fzxz1','date_mm7f8hw6','long_text_mm8xk5vw','long_text_mm8xeb55','text_mm8xen8a','date_mm8xx6fr','color_mm8x8cxv','date_mm8x4m1e'];
+const BRAIN_COLUMNS = ['board_relation_mm7s293s','country_mm7fphac','boolean_mm8q7cvs','boolean_mm8qvyqt','boolean_mm8qa0fn','color_mm8daknj','lookup_mm8vv96a','color_mm7h7hf1','long_text_mm7fzxz1','date_mm7f8hw6','long_text_mm8xk5vw','long_text_mm8xeb55','text_mm8xen8a','date_mm8xx6fr','color_mm8x8cxv','date_mm8x4m1e','text_mm8xs421','long_text_mm8xm0zp','link_mm8xxpv1'];
 const SIGNUP_COLUMNS = ['hardware_placement','color_mm8ckctx'];
 const CLOSED = new Set(['Closed','Revisit done','Waived']);
 const GOOD_PHASE = /^(Complete|Installed|Installed\/Hypercare|Installed\/Hypercare|Hypercare|Live - Non-Integrated)$/i;
@@ -135,13 +136,16 @@ export function joinTracker(raw, health = {}) {
       const legacyNotes=text(row,config.notes);
       const notes=brain?text(brain,'long_text_mm8xk5vw'):'';
       const readiness=installReadiness({date:installDate,complete:good&&!activeIssues.length,conflictingDate:brain&&date(brain,'date_mm7f8hw6')&&date(brain,'date_mm7f8hw6')!==installDate,sourcesHealthy:health.incidents?.ok!==false&&health.responses?.ok!==false,activeIssues:activeIssues.length,explicitOutstanding:[response?.received,response?.tableArrived,response?.power,response?.data,response?.hardware,response?.network,response?.access].includes('No')||Boolean(a.exceptionDetails&&!/^(none|n\/a|no issues)$/i.test(a.exceptionDetails)),siteStatus:text(row,config.siteStatus),decision:brain?text(brain,'color_mm8x8cxv'):'',decisionDate:brain?date(brain,'date_mm8x4m1e'):'',gate:text(row,config.readinessGate),blockReason:text(row,config.blockReason),responseApproved:response?.review==='Approved'&&[response?.received,response?.power,response?.data,response?.hardware,response?.network,response?.access,...(sfk?[response?.tableArrived]:[])].every(v=>v==='Yes')});
+      let snapshot=null;try{snapshot=JSON.parse(brain?text(brain,'long_text_mm8xm0zp'):'null');}catch{}
+      const ped=reconcilePed({legacyRaw:text(row,config.pedStatus),snapshot,binding:{store,market,boardId:config.id,itemId:String(row.id),installDate},signed:brain&&checked(brain,'boolean_mm8qvyqt')?'Yes':'Unknown',ordered:brain&&checked(brain,'boolean_mm8qa0fn')?'Yes':'Unknown',received:response?.received||'Unknown',sourceUrl:rowUrl(config.id,row.id),sourceColumn:config.pedStatus,sourceUpdatedAt:row.updated_at,observedAt:new Date().toISOString()});
+      if(ped.conflict){sourceWarnings.push('Historical PED evidence conflicts with the current position; VM review required');if(!good){readiness.ready=false;readiness.label='Review needed';readiness.reason='Conflicting PED evidence needs VM review';}}
       sites.push({
         id:String(row.id),boardId:config.id,store,country:market,date:installDate,type:sfk?'SFK':'Standard',phase,
         dateStatus:text(row,config.dateStatus), outcome,attempted:good||issueHistory.length>0||ISSUE_PHASE.test(phase),hadIssue:issueHistory.length>0||ISSUE_PHASE.test(phase),
-        signed:brain && checked(brain,'boolean_mm8qvyqt')?'Yes':'Unknown',
-        ordered:brain && checked(brain,'boolean_mm8qa0fn')?'Yes':'Unknown',
+        signed:ped.signed,
+        ordered:ped.ordered,
         invitationSent:brain ? checked(brain,'boolean_mm8q7cvs') : false,
-        received:response?.received || 'Unknown',
+        received:ped.received,ped,
         tableOrdered:sfk?tableOrdered:'Not required',tableArrived:sfk?(response?.tableArrived||'Unknown'):'Not required',
         tableOrderDate:response?.tableOrderDate||'',tableEta:response?.tableEta||'',
         tablePayment:brain?text(brain,'color_mm8daknj'):'',
