@@ -45,7 +45,7 @@ function RD_monday_(query,variables,p){
 }
 function RD_verifySource_(c,p,previous){
  // This mapping must be reviewed against CURRENT Brain columns, never guessed.
- var m=JSON.parse(p.getProperty('RD_SOURCE_MAP')||'null');if(!m||!m.brainBoardId||!m.countryColumn||!m.fzeEmailColumn||!m.mfpEmailColumn||!m.installDateColumn)throw Error('Verified Brain source mapping required');
+ var m=JSON.parse(p.getProperty('RD_SOURCE_MAP')||'null');if(!m||!m.brainBoardId||!m.countryColumn||!m.fzeEmailColumn||!m.installDateColumn)throw Error('Verified Brain source mapping required');
  if(!/^\d+$/.test(String(c.brainItemId||'')))throw Error('Bound Brain item required');
  var data=RD_monday_('query($ids:[ID!]!){items(ids:$ids){id name board{id} column_values{id text value ... on BoardRelationValue{linked_item_ids}}}}',{ids:[String(c.brainItemId)]},p),item=data.items[0];
  if(!item||String(item.board.id)!==String(m.brainBoardId))throw Error('Brain identity mismatch');
@@ -56,12 +56,15 @@ function RD_verifySource_(c,p,previous){
   if(!links||!links.linked_item_ids||links.linked_item_ids.length!==1||String(links.linked_item_ids[0])!==String(binding.itemId))throw Error('Exact installation relationship required');
  }
  var country=market((values[m.countryColumn]||{}).text);if(country!==market(binding.country))throw Error('Market mismatch');
- if(c.operation==='issue'&&((values[m.fzeEmailColumn]||{}).text!==c.fzeEmail||(values[m.mfpEmailColumn]||{}).text!==c.mfpEmail||String(item.name).trim()!==binding.store))throw Error('Recipient/store source mismatch');
+ if(c.operation==='issue'&&((values[m.fzeEmailColumn]||{}).text!==c.fzeEmail||String(item.name).trim()!==binding.store))throw Error('Recipient/store source mismatch');
  var value=JSON.parse((values[m.installDateColumn]||{}).value||'null');if(!value||value.date!==binding.installDate)throw Error('Install date changed');
  var evidence=RD_projectEvidence_(item,p,c.operation==='issue');
  if(!m.installLinkColumn)RD_assertInstallSignup_(binding,evidence.signupItemId,p);
  if(c.operation==='issue'){
-  var verifiedHfp=RD_hfpEmail_(evidence.hfpPersonId,p);
+  var verifiedMfp=m.mfpEmailColumn?(values[m.mfpEmailColumn]||{}).text:RD_assigneeEmail_(evidence.mfpPersonId,p);
+  if(c.mfpEmail&&c.mfpEmail!==verifiedMfp)throw Error('MFP source mismatch');
+  c.mfpEmail=verifiedMfp;
+  var verifiedHfp=RD_assigneeEmail_(evidence.hfpPersonId,p);
   if(c.hfpEmail&&c.hfpEmail!==verifiedHfp)throw Error('HFP source mismatch');
   c.hfpEmail=verifiedHfp;
  }
@@ -167,7 +170,7 @@ function RD_assertCurrent_(record,p){
 
 
 // Verified schema on 28 October 2026. Exact Brain→Sign Up identity, no name matching.
-function RD_projectEvidence_(brain,p,includeHfp){
+function RD_projectEvidence_(brain,p,includeRecipients){
  if(String(brain.board.id)!=='18432365825')throw Error('Project source must be the verified Brain board');
  var v={};brain.column_values.forEach(function(c){v[c.id]=c;});
  var link=v.board_relation_mm7s293s;if(!link||!link.linked_item_ids||link.linked_item_ids.length!==1)throw Error('Exactly one linked Sign Up store required');
@@ -176,11 +179,13 @@ function RD_projectEvidence_(brain,p,includeHfp){
  var s={};signup.column_values.forEach(function(c){s[c.id]=c;});
  var raw=[(v.color_mm7f7r9d||{}).text,(s.dup__of_store_type5__1||{}).text];
  if((s.label7||{}).text)raw.push(s.label7.text);
- var hfp=(s.people2__1||{}).persons_and_teams||[];
- var hfpPersonId=includeHfp&&hfp.length===1&&hfp[0].kind==='person'?String(hfp[0].id):'';
- return {hfpPersonId:hfpPersonId,projectType:verifiedProjectType(raw),installType:equipmentScopeFromSources((v.dropdown_mm7ftf76||{}).text,[(s.color_mkwjhm4b||{}).text,(s.dup__of_layout_type_bau1__1||{}).text]),brainProjectColumn:'color_mm7f7r9d',signupItemId:String(signup.id),signupOpeningColumn:'dup__of_store_type5__1',signupProjectColumn:'label7',rawLabels:raw};
+ function person(column){
+  var assigned=(s[column]||{}).persons_and_teams||[];
+  return includeRecipients&&assigned.length===1&&assigned[0].kind==='person'?String(assigned[0].id):'';
+ }
+ return {hfpPersonId:person('people2__1'),mfpPersonId:person('people__1'),projectType:verifiedProjectType(raw),installType:equipmentScopeFromSources((v.dropdown_mm7ftf76||{}).text,[(s.color_mkwjhm4b||{}).text,(s.dup__of_layout_type_bau1__1||{}).text]),brainProjectColumn:'color_mm7f7r9d',signupItemId:String(signup.id),signupOpeningColumn:'dup__of_store_type5__1',signupProjectColumn:'label7',rawLabels:raw};
 }
-function RD_hfpEmail_(personId,p){
+function RD_assigneeEmail_(personId,p){
  if(!/^\d+$/.test(personId))return '';
  var users=RD_monday_('query($ids:[ID!]!){users(ids:$ids){id email enabled is_pending}}',{ids:[personId]},p).users;
  if(!users||users.length!==1||String(users[0].id)!==personId||users[0].enabled!==true||users[0].is_pending!==false)return '';

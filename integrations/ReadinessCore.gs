@@ -3,7 +3,7 @@
 // Shared deterministic rules; calendar dates deliberately avoid browser time zones.
 const MARKETS = { UK: 'en', IE: 'en', NL: 'nl', DE: 'de' };
 function market(value) {
-  const m = ({ GB: 'UK', IRL: 'IE' })[value] || value;
+  const m = ({ GB: 'UK', IRL: 'IE', 'UNITED KINGDOM': 'UK', IRELAND: 'IE', NETHERLANDS: 'NL', GERMANY: 'DE' })[String(value || '').trim().toUpperCase()] || value;
   if (!Object.prototype.hasOwnProperty.call(MARKETS, m)) throw Error('Unsupported market');
   return m;
 }

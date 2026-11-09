@@ -15,7 +15,7 @@ const credentials={tokenHash:'a'.repeat(64),revision:1};
 const create=()=>reduce(null,{operation:'issue',binding,fzeEmail:'fze@example.test',mfpEmail:'mfp@example.test',hfpEmail:'hfp@example.test',sourceVerified:true,...credentials,expires:now+864000000,sourceReference:{brainItemId:'42'}},now).record;
 const command=(operation,more={})=>({operation,...credentials,...more});
 test('calendar schedule crosses months/leap days without DST drift',()=>{assert.deepEqual(milestones('2026-11-07').map(x=>x.date),['2026-10-28','2026-10-31','2026-11-02','2026-11-03','2026-11-04']);assert.equal(plusDays('2028-03-01',-1),'2028-02-29');assert.equal(londonToday(new Date('2026-07-01T23:30:00Z')),'2026-07-02');assert.throws(()=>plusDays('2026-02-30',1));});
-test('unknown market and cross-country binding blocked',()=>{assert.equal(market('IRL'),'IE');assert.throws(()=>market('FR'));assert.throws(()=>validateBinding({...binding,country:'NL'}));});
+test('unknown market and cross-country binding blocked',()=>{assert.equal(market('IRL'),'IE');assert.equal(market('United Kingdom'),'UK');assert.equal(market('Germany'),'DE');assert.equal(market('Netherlands'),'NL');assert.throws(()=>market('FR'));assert.throws(()=>validateBinding({...binding,country:'NL'}));});
 test('readiness warnings escalate from FZE to MFP and HFP before stand-down',()=>{
  const r=create();
  assert.equal(planReminder(r,'2026-10-27').state,'waiting');
@@ -88,7 +88,7 @@ test('Brain and BAU identity require the exact shared Sign Up item',()=>{
  row.column_values[0].linked_items=[{id:'44',board:{id:'5678025992'}}];
  assert.throws(verify,/Exact shared Sign Up/);
 });
-test('linked Sign Up HFP resolves only one active, assigned Monday user',()=>{
+test('linked Sign Up recipients resolve only one active, assigned Monday user per role',()=>{
  const {context}=coordinatorHarness();
  const item={board:{id:'18432365825'},column_values:[
   {id:'board_relation_mm7s293s',linked_item_ids:['43']},
@@ -106,9 +106,11 @@ test('linked Sign Up HFP resolves only one active, assigned Monday user',()=>{
   return {items:[{id:'43',board:{id:'5678025992'},column_values:[
    {id:'dup__of_store_type5__1',text:'Retrofit'},
    {id:'people2__1',persons_and_teams:hfp},
+   {id:'people__1',persons_and_teams:[{id:'8',kind:'person'}]},
   ]}]};
  };
- const resolve=()=>context.RD_hfpEmail_(context.RD_projectEvidence_(item,null,true).hfpPersonId,null);
+ const resolve=()=>context.RD_assigneeEmail_(context.RD_projectEvidence_(item,null,true).hfpPersonId,null);
+ assert.equal(context.RD_projectEvidence_(item,null,true).mfpPersonId,'8');
  assert.equal(resolve(),'hfp@example.test');
  user={...user,enabled:false};
  assert.equal(resolve(),'');
