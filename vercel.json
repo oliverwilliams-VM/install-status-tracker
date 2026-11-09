@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/readiness-tracker.html",
+      "permanent": false,
+      "missing": [{ "type": "query", "key": "view" }]
+    }
+  ]
+}
