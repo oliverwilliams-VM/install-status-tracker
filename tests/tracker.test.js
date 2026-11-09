@@ -29,3 +29,28 @@ test('an upcoming install needs PED receipt evidence even with a Brain or legacy
  }
  assert.equal(joinTracker({UK:[site]}).sites[0].readiness.label,'Complete');
 });
+
+test('a dated Brain outcome distinguishes a clean revisit from a current installation exception',()=>{
+ const incidentColumns=sources.incidents.columns;
+ const incident=(when,scenario)=>({id:'incident',name:site.name,column_values:[
+  cell(incidentColumns.bau,'',null,[site.id]),cell(incidentColumns.status,'Revisit to book'),
+  cell(incidentColumns.date,'',{date:when}),cell(incidentColumns.scenario,scenario)
+ ]});
+ const brain=(outcome,date='2026-11-16')=>({id:'brain-job',column_values:[
+  cell('board_relation_mm7s293s','',null,['signup']),
+  cell('date_mm7f8hw6','',{date}),cell('color_mm7h7hf1',outcome)
+ ]});
+ const run=(job,incidents)=>joinTracker({UK:[site],brain:[job],incidents}).sites[0];
+ const old=incident('2026-10-20','No SFK table on site');
+ const complete=run(brain('Installed'),[old]);
+ assert.equal(complete.outcome,'Installed');
+ assert.equal(complete.activeIssueCount,0);
+ assert.equal(complete.incidents.length,1);
+ assert.equal(complete.hadIssue,true);
+ const noPeds=incident('2026-11-16','Installed without PEDs');
+ const partial=run(brain('Part Installed / Revisit'),[noPeds]);
+ assert.equal(partial.outcome,'Installed with outstanding items');
+ assert.match(partial.outstanding,/without PEDs/);
+ assert.equal(run(brain('Installed'),[noPeds]).outcome,'Installed with outstanding items');
+ assert.equal(run(brain('Installed','2026-10-20'),[old]).outcome,'Installed with outstanding items');
+});

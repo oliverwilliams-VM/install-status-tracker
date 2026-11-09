@@ -125,11 +125,20 @@ export function joinTracker(raw, health = {}) {
       const a = response?.answers || {};
       const sfk = /sfk|small.?format/i.test(text(row,config.format));
       const issueHistory = incidents.filter(i=>i.bauItems.includes(String(row.id)));
-      const activeIssues = issueHistory.filter(i=>!CLOSED.has(i.status));
+      const brainOutcome = brain && installDate && date(brain,'date_mm7f8hw6') === installDate
+        ? text(brain,'color_mm7h7hf1') : '';
+      const confirmedInstalled = brainOutcome === 'Installed';
+      // Keep earlier attempts in history. A dated, successful Brain outcome
+      // supersedes earlier incidents for the current install classification.
+      const bookingIssues = confirmedInstalled
+        ? issueHistory.filter(i => !i.date || i.date >= installDate)
+        : issueHistory;
+      const activeIssues = bookingIssues.filter(i=>!CLOSED.has(i.status));
       const phase = text(row,config.phase);
-      const good = GOOD_PHASE.test(phase);
+      const good = confirmedInstalled || (!brainOutcome && GOOD_PHASE.test(phase));
       const issue = ISSUE_PHASE.test(phase) || activeIssues.length>0;
-      let outcome = /abort/i.test(phase) ? 'Aborted' : /revisit/i.test(phase) ? 'Revisit required' : /part/i.test(phase) ? 'Installed with outstanding items' : good ? (/live|hypercare|complete/i.test(phase)?'Live':'Installed') : issue ? 'Issue under review' : /cancel|deinstall|postpon/i.test(phase) ? phase : 'Pending';
+      const brainOutcomes = {'Installed':'Installed','Part Installed / Revisit':'Installed with outstanding items','Aborted / Revisit':'Aborted','Cancelled':'Cancelled'};
+      let outcome = brainOutcomes[brainOutcome] || (/abort/i.test(phase) ? 'Aborted' : /revisit/i.test(phase) ? 'Revisit required' : /part/i.test(phase) ? 'Installed with outstanding items' : good ? (/live|hypercare|complete/i.test(phase)?'Live':'Installed') : issue ? 'Issue under review' : /cancel|deinstall|postpon/i.test(phase) ? phase : 'Pending');
       if (good && activeIssues.length) outcome = 'Installed with outstanding items';
       const tableOrdered = response?.tableOrdered !== 'Unknown' && response?.tableOrdered ? response.tableOrdered :
         brain && /^ordered/i.test(text(brain,'color_mm8daknj')) ? 'Yes' : signup && /^ordered/i.test(text(signup,'color_mm8ckctx')) ? 'Yes' : (brain && /^not ordered$/i.test(text(brain,'color_mm8daknj'))) ? 'No' : 'Unknown';
@@ -143,7 +152,7 @@ export function joinTracker(raw, health = {}) {
       if(ped.conflict){sourceWarnings.push('Historical PED evidence conflicts with the current position; VM review required');if(!good){readiness.ready=false;readiness.label='Review needed';readiness.reason='Conflicting PED evidence needs VM review';}}
       sites.push({
         id:String(row.id),boardId:config.id,store,country:market,date:installDate,type:sfk?'SFK':'Standard',phase,
-        dateStatus:text(row,config.dateStatus), outcome,attempted:good||issueHistory.length>0||ISSUE_PHASE.test(phase),hadIssue:issueHistory.length>0||ISSUE_PHASE.test(phase),
+        dateStatus:text(row,config.dateStatus), outcome,attempted:good||['Part Installed / Revisit','Aborted / Revisit'].includes(brainOutcome)||issueHistory.length>0||ISSUE_PHASE.test(phase),hadIssue:issueHistory.length>0||ISSUE_PHASE.test(phase),
         signed:ped.signed,
         ordered:ped.ordered,
         invitationSent:brain ? checked(brain,'boolean_mm8q7cvs') : false,
@@ -157,8 +166,8 @@ export function joinTracker(raw, health = {}) {
         ia:links(row,config.ia).length?'Linked':'Unknown',
         readiness,brainId:brain?String(brain.id):'',brainDate:brain?date(brain,'date_mm7f8hw6'):'',notesSource:notes?'Brian':legacyNotes?'Legacy BAU':'Brian',legacyVm:legacyNotes,vm:notes||legacyNotes,phone:text(row,config.feedback),action:brain?text(brain,'long_text_mm8xeb55'):text(row,config.action),owner:brain?text(brain,'text_mm8xen8a'):text(row,config.owner),due:brain?date(brain,'date_mm8xx6fr'):date(row,config.due),
         createdAt:row.created_at,updatedAt:row.updated_at, responses:history, currentResponseId:response?.id||'',
-        rootCause:[...new Set(issueHistory.map(i=>i.fault).filter(Boolean))].join(' / ')||'Unassigned',
-        causeDetail:issueHistory.map(i=>i.scenario).filter(Boolean).join('\n'),
+        rootCause:[...new Set(bookingIssues.map(i=>i.fault).filter(Boolean))].join(' / ')||'Unassigned',
+        causeDetail:bookingIssues.map(i=>i.scenario).filter(Boolean).join('\n'),
         outstanding:activeIssues.map(i=>i.scenario||i.outcome||'Incident details required').concat(a.exceptionDetails && !/^(none|n\/a|no issues)$/i.test(a.exceptionDetails)?[a.exceptionDetails]:[]).join('\n'),
         incidents:issueHistory, activeIssueCount:activeIssues.length,
         sources:{bau:rowUrl(config.id,row.id),brain:brain?rowUrl(BRAIN_ID,brain.id):'',response:response?.url||'',incidents:issueHistory.map(i=>i.url)},
