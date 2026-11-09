@@ -22,7 +22,13 @@ function londonToday(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 }
 function milestones(installDate) {
-  return [-10, -7, -5].map((offset, i) => ({ stage: ['invite', 'chase1', 'chase2'][i], date: plusDays(installDate, offset), offset, copyMfp: i === 2 }));
+  return [
+    { stage: 'invite', offset: -10 },
+    { stage: 'chase1', offset: -7 },
+    { stage: 'chase2', offset: -5, copyMfp: true },
+    { stage: 'finalWarning', offset: -4, copyMfp: true, copyHfp: true },
+    { stage: 'standDown', offset: -3 },
+  ].map(milestone => ({ ...milestone, date: plusDays(installDate, milestone.offset) }));
 }
 function validateBinding(b) {
   if (!b || !/^[a-zA-Z0-9_-]{1,80}$/.test(b.id || '') || !/^\d{1,10}$/.test(b.store || '') || !/^\d+$/.test(b.itemId || '') || !/^\d+$/.test(b.boardId || '') || !['sfk', 'other'].includes(b.installType)) throw Error('Invalid installation binding');
@@ -156,19 +162,23 @@ function planReminder(record, today) {
   dateOnly(today);
   if (record.projectTypeIssue) return {state:'stopped',reason:'Project type discrepancy requires team review'};
   if (record.cancelled || record.completed || ['Live', 'Postponed', 'Partially completed', 'Aborted'].includes(record.outcome) || record.submitted || today >= record.binding.installDate) return { state: 'stopped', reason: record.submitted ? 'Response received; follow up blockers separately' : 'No outstanding future install' };
-  const due = milestones(record.binding.installDate).filter(x => x.date <= today);
-  if (!due.length) return { state: 'waiting', next: milestones(record.binding.installDate)[0].date };
+  const schedule = milestones(record.binding.installDate);
+  const due = schedule.filter(x => x.date <= today);
+  if (!due.length) return { state: 'waiting', next: schedule[0].date };
   const sent = record.sent || {};
   const latest = due[due.length - 1];
+  if (latest.stage === 'standDown') return { state: 'standDown', reason: 'Readiness response outstanding; cancellation and Apex stand-down due', scheduledDate: latest.date };
   if (sent[latest.stage]) return { state: 'waiting', reason: 'Latest due stage already sent' };
   // Late arrivals receive one consolidated message, never a burst of old chasers.
-  const stage = Object.keys(sent).length ? latest.stage : 'invite';
+  const stage = latest.copyMfp || Object.keys(sent).length ? latest.stage : 'invite';
   if (sent[stage]) return { state: 'waiting', reason: 'Await next milestone' };
   if (Object.values(sent).some(x => x.date === today)) return { state: 'waiting', reason: 'One message per installation per day' };
-  const copyMfp = latest.copyMfp;
-  if (!record.fzeEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(record.fzeEmail)) return { state: 'blocked', reason: 'Verified FZE email required' };
-  if (copyMfp && (!record.mfpEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(record.mfpEmail))) return { state: 'blocked', reason: 'Verified store MFP email required for escalation' };
-  return { state: 'due', stage, date: today, scheduledDate: latest.date, copyMfp, to: record.fzeEmail, cc: copyMfp ? record.mfpEmail : '', key: `${record.binding.id}:${record.revision}:${stage}`, late: stage === 'invite' && latest.stage !== 'invite' };
+  const copyMfp = Boolean(latest.copyMfp);
+  if (!record.fzeEmail || !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(record.fzeEmail)) return { state: 'blocked', reason: 'Verified FZE email required' };
+  if (copyMfp && (!record.mfpEmail || !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(record.mfpEmail))) return { state: 'blocked', reason: 'Verified store MFP email required for escalation' };
+  if (latest.copyHfp && !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(record.hfpEmail || '')) return { state: 'blocked', reason: 'Verified store HFP email required for final warning' };
+  const cc = copyMfp ? [record.mfpEmail, ...(latest.copyHfp ? [record.hfpEmail] : [])].join(', ') : '';
+  return { state: 'due', stage, date: today, scheduledDate: latest.date, copyMfp, to: record.fzeEmail, cc, key: `${record.binding.id}:${record.revision}:${stage}`, late: stage === 'invite' && latest.stage !== 'invite' };
 }
 function reschedule(record, installDate) {
   dateOnly(installDate);
@@ -318,19 +328,19 @@ const COPY = {
     title: 'Let’s get your restaurant ready.', eyebrow: 'YOUR INSTALLATION', intro: 'Confirm the preparations below so we can resolve anything outstanding before your installation.',
     contact: 'Your name', team: 'Is your restaurant team prepared for the installation?', area: 'Is the installation area clear and ready?', powerData: 'Are power and data installed to the agreed specification?', peds: 'Have your payment terminals arrived?', floorplan: 'Does your floorplan match what you are expecting?', table: 'Have you ordered your Small Format Kiosk table?', tableDelivery: 'Expected table delivery date (if known)', comments: 'Comments or anything we need to know', evidence: 'Add photos of power/data and payment terminals (JPEG or PNG, maximum 1 MB each)',
     yes: 'Yes', no: 'No', pending: 'Not yet / needs confirmation', choose: 'Choose an answer', submit: 'Submit readiness update', saved: 'Thank you. Your readiness update has been recorded.', savedBlocker: 'Thank you. Your response has been recorded and the outstanding items need follow-up.', edit: 'Send another update', history: 'Your previous updates', guides: 'Installation guides', review: 'Review preview — fictional restaurant. No live emails or Monday changes.', liveNotice: 'Your answers are shared with the installation team. Please do not include payment-card data or passwords.', uploading: 'Saving your update…', error: 'We could not save your update. Please try again.', invalid: 'Please answer every question and enter your name.', country: 'Country', install: 'Installation', sfk: 'Small Format Kiosk', other: 'Other installation', evidenceCount: 'photos attached',
-    mailSubject: 'Installation readiness', invitation: 'Please confirm your restaurant is ready for installation.', chase1: 'A reminder to complete your installation readiness update.', chase2: 'Your readiness response is still outstanding. Your MFP is copied to help resolve this.', late: 'Your installation is approaching. Please complete your readiness update as soon as possible.', mailAction: 'Confirm readiness', mailClose: 'If anything is not ready, tell us in the form so the team can help.', signature: 'Vita Mojo – Subway EMEA Team'
+    mailSubject: 'Installation readiness', invitation: 'Please confirm your restaurant is ready for installation.', chase1: 'A reminder to complete your installation readiness update.', chase2: 'Please complete your readiness update within 24 hours. We have copied your MFP.', finalWarning: 'Final warning: please complete your readiness update today. If your response is still outstanding at the cut-off, we will cancel the installation and stand down the installation team.', late: 'Your installation is approaching. Please complete your readiness update as soon as possible.', mailAction: 'Confirm readiness', mailClose: 'If anything is not ready, tell us in the form so the team can help.', signature: 'Vita Mojo – Subway EMEA Team'
   },
   nl: {
     title: 'Maak uw restaurant klaar voor de installatie.', eyebrow: 'UW INSTALLATIE', intro: 'Bevestig de onderstaande voorbereidingen, zodat we openstaande punten vóór uw installatie kunnen oplossen.',
     contact: 'Uw naam', team: 'Is uw restaurantteam voorbereid op de installatie?', area: 'Is de installatieplek vrij en gereed?', powerData: 'Zijn stroom en data volgens de afgesproken specificaties aangelegd?', peds: 'Zijn uw betaalterminals aangekomen?', floorplan: 'Komt de plattegrond overeen met uw verwachtingen?', table: 'Heeft u de tafel voor uw Small Format Kiosk besteld?', tableDelivery: 'Verwachte leverdatum van de tafel (indien bekend)', comments: 'Opmerkingen of zaken die wij moeten weten', evidence: 'Voeg foto’s van stroom/data en betaalterminals toe (JPEG of PNG, maximaal 1 MB per foto)',
     yes: 'Ja', no: 'Nee', pending: 'Nog niet / bevestiging nodig', choose: 'Kies een antwoord', submit: 'Gereedheidsupdate versturen', saved: 'Bedankt. Uw gereedheidsupdate is geregistreerd.', savedBlocker: 'Bedankt. Uw reactie is geregistreerd. De openstaande punten moeten worden opgevolgd.', edit: 'Nog een update versturen', history: 'Uw eerdere updates', guides: 'Installatiehandleidingen', review: 'Testversie — fictief restaurant. Geen echte e-mails of wijzigingen in Monday.', liveNotice: 'Uw antwoorden worden gedeeld met het installatieteam. Vermeld geen betaalkaartgegevens of wachtwoorden.', uploading: 'Uw update wordt opgeslagen…', error: 'Uw update kon niet worden opgeslagen. Probeer het opnieuw.', invalid: 'Beantwoord alle vragen en vul uw naam in.', country: 'Land', install: 'Installatie', sfk: 'Small Format Kiosk', other: 'Andere installatie', evidenceCount: 'foto’s toegevoegd',
-    mailSubject: 'Gereedheid voor installatie', invitation: 'Bevestig of uw restaurant gereed is voor de installatie.', chase1: 'Een herinnering om uw gereedheidsupdate voor de installatie in te vullen.', chase2: 'Wij hebben uw gereedheidsreactie nog niet ontvangen. Uw MFP staat in de cc om te helpen.', late: 'Uw installatie nadert. Vul uw gereedheidsupdate zo snel mogelijk in.', mailAction: 'Gereedheid bevestigen', mailClose: 'Is er iets nog niet klaar? Vermeld dit in het formulier, zodat het team kan helpen.', signature: 'Vita Mojo – Subway EMEA Team'
+    mailSubject: 'Gereedheid voor installatie', invitation: 'Bevestig of uw restaurant gereed is voor de installatie.', chase1: 'Een herinnering om uw gereedheidsupdate voor de installatie in te vullen.', chase2: 'Vul uw gereedheidsupdate binnen 24 uur in. Uw MFP staat in de cc.', finalWarning: 'Laatste waarschuwing: vul uw gereedheidsupdate vandaag in. Als we uw reactie niet op tijd ontvangen, annuleren we de installatie en melden we het installatieteam af.', late: 'Uw installatie nadert. Vul uw gereedheidsupdate zo snel mogelijk in.', mailAction: 'Gereedheid bevestigen', mailClose: 'Is er iets nog niet klaar? Vermeld dit in het formulier, zodat het team kan helpen.', signature: 'Vita Mojo – Subway EMEA Team'
   },
   de: {
     title: 'Bereiten Sie Ihr Restaurant auf die Installation vor.', eyebrow: 'IHRE INSTALLATION', intro: 'Bestätigen Sie die folgenden Vorbereitungen, damit wir offene Punkte vor Ihrer Installation klären können.',
     contact: 'Ihr Name', team: 'Ist Ihr Restaurantteam auf die Installation vorbereitet?', area: 'Ist der Installationsbereich frei und vorbereitet?', powerData: 'Sind Strom und Daten gemäß den vereinbarten Vorgaben installiert?', peds: 'Sind Ihre Zahlungsterminals angekommen?', floorplan: 'Entspricht der Grundriss Ihren Erwartungen?', table: 'Haben Sie den Tisch für Ihren Small Format Kiosk bestellt?', tableDelivery: 'Voraussichtlicher Liefertermin des Tisches (falls bekannt)', comments: 'Anmerkungen oder Informationen für unser Team', evidence: 'Fotos von Strom/Daten und Zahlungsterminals hinzufügen (JPEG oder PNG, maximal 1 MB pro Foto)',
     yes: 'Ja', no: 'Nein', pending: 'Noch nicht / Bestätigung erforderlich', choose: 'Antwort auswählen', submit: 'Bereitschaftsupdate senden', saved: 'Vielen Dank. Ihr Bereitschaftsupdate wurde gespeichert.', savedBlocker: 'Vielen Dank. Ihre Antwort wurde gespeichert. Die offenen Punkte müssen nachverfolgt werden.', edit: 'Weiteres Update senden', history: 'Ihre bisherigen Updates', guides: 'Installationsanleitungen', review: 'Testversion — fiktives Restaurant. Keine echten E-Mails oder Änderungen in Monday.', liveNotice: 'Ihre Antworten werden mit dem Installationsteam geteilt. Geben Sie keine Kartendaten oder Passwörter ein.', uploading: 'Ihr Update wird gespeichert…', error: 'Ihr Update konnte nicht gespeichert werden. Bitte versuchen Sie es erneut.', invalid: 'Bitte beantworten Sie alle Fragen und geben Sie Ihren Namen ein.', country: 'Land', install: 'Installation', sfk: 'Small Format Kiosk', other: 'Andere Installation', evidenceCount: 'Fotos hinzugefügt',
-    mailSubject: 'Vorbereitung auf die Installation', invitation: 'Bitte bestätigen Sie, ob Ihr Restaurant für die Installation bereit ist.', chase1: 'Eine Erinnerung: Bitte füllen Sie Ihr Bereitschaftsupdate für die Installation aus.', chase2: 'Ihre Rückmeldung zur Installationsbereitschaft steht noch aus. Ihr MFP ist zur Unterstützung in Kopie.', late: 'Ihre Installation steht bevor. Bitte füllen Sie Ihr Bereitschaftsupdate so bald wie möglich aus.', mailAction: 'Bereitschaft bestätigen', mailClose: 'Falls etwas noch nicht bereit ist, teilen Sie uns dies im Formular mit, damit das Team helfen kann.', signature: 'Vita Mojo – Subway EMEA Team'
+    mailSubject: 'Vorbereitung auf die Installation', invitation: 'Bitte bestätigen Sie, ob Ihr Restaurant für die Installation bereit ist.', chase1: 'Eine Erinnerung: Bitte füllen Sie Ihr Bereitschaftsupdate für die Installation aus.', chase2: 'Bitte füllen Sie Ihr Bereitschaftsupdate innerhalb von 24 Stunden aus. Ihr MFP ist in Kopie.', finalWarning: 'Letzte Warnung: Bitte füllen Sie Ihr Bereitschaftsupdate noch heute aus. Wenn Ihre Rückmeldung nicht fristgerecht eingeht, sagen wir den Installationstermin ab und informieren das Installationsteam.', late: 'Ihre Installation steht bevor. Bitte füllen Sie Ihr Bereitschaftsupdate so bald wie möglich aus.', mailAction: 'Bereitschaft bestätigen', mailClose: 'Falls etwas noch nicht bereit ist, teilen Sie uns dies im Formular mit, damit das Team helfen kann.', signature: 'Vita Mojo – Subway EMEA Team'
   }
 };
 function copyFor(country) { const lang = MARKETS[market(country)]; return { ...COPY[lang], ...EXTRA_COPY[lang] }; }
@@ -338,24 +348,23 @@ const escape = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&l
 function emailPreview(record, plan, url) {
   const c = copyFor(record.binding.country);
   if (!/^https:\/\/[^\s<>\"']+$/.test(url)) throw Error('HTTPS portal link required');
-  const message = plan.late ? c.late : ({ invite: c.invitation, chase1: c.chase1, chase2: c.chase2 })[plan.stage];
+  const message = plan.late ? c.late : ({ invite: c.invitation, chase1: c.chase1, chase2: c.chase2, finalWarning: c.finalWarning })[plan.stage];
   if (!message) throw Error('Unknown email stage');
   const date = record.binding.installDate;
   const subject = `${c.mailSubject} — ${record.binding.store} — ${date}`;
   const text = `${message}\n\n${c.install}: ${date}\n${record.binding.store}\n\n${c.mailAction}: ${url}\n\n${c.mailClose}\n\n${c.signature}`;
   const html = `<div style="font-family:Arial,sans-serif;color:#132f39;max-width:600px;margin:auto;padding:32px"><p style="font-weight:bold">SUBWAY × VITA MOJO</p><h1 style="font-size:24px">${escape(c.mailSubject)}</h1><p>${escape(message)}</p><p><strong>${escape(record.binding.store)}</strong> · ${escape(date)}</p><p style="margin:32px 0"><a style="background:#ffd54a;color:#132f39;padding:16px 24px;border-radius:6px;font-weight:bold" href="${escape(url)}">${escape(c.mailAction)}</a></p><p>${escape(c.mailClose)}</p><p>${escape(c.signature)}</p><p style="font-size:12px;word-break:break-all">${escape(url)}</p></div>`;
-  return { subject, text, html, to: plan.to || record.fzeEmail, cc: plan.copyMfp ? record.mfpEmail : '' };
+  return { subject, text, html, to: plan.to || record.fzeEmail, cc: plan.cc ?? (plan.copyMfp ? record.mfpEmail : '') };
 }
-
 
 function reduce(previous, c, now) {
  const at = new Date(now).toISOString();
  if (c.operation === 'issue') {
   validateBinding(c.binding);
   if (previous) throw Error('Request exists; reconcile or reschedule');
-  for (const k of ['fzeEmail','mfpEmail']) if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c[k] || '')) throw Error('Verified recipients required');
+  for (const k of ['fzeEmail','mfpEmail',...(c.hfpEmail ? ['hfpEmail'] : [])]) if (!/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(c[k] || '')) throw Error('Verified recipients required');
   if (!c.sourceVerified || !/^[a-f0-9]{64}$/.test(c.tokenHash || '') || !(c.expires > now)) throw Error('Verified source and credentials required');
-  const record = {binding:c.binding,revision:1,tokenHash:c.tokenHash,expires:c.expires,fzeEmail:c.fzeEmail,mfpEmail:c.mfpEmail,sourceReference:c.sourceReference,submitted:false,answers:null,sent:{},history:[],notes:[],pendingMail:null,pendingSubmission:null,submissions:{},createdAt:at};
+  const record = {binding:c.binding,revision:1,tokenHash:c.tokenHash,expires:c.expires,fzeEmail:c.fzeEmail,mfpEmail:c.mfpEmail,hfpEmail:c.hfpEmail,sourceReference:c.sourceReference,submitted:false,answers:null,sent:{},history:[],notes:[],pendingMail:null,pendingSubmission:null,submissions:{},createdAt:at};
   return {record,result:{id:record.binding.id,revision:1}};
  }
  if (!previous) throw Error('Request not found');
@@ -426,4 +435,3 @@ function reduce(previous, c, now) {
  }
  throw Error('Unsupported operation');
 }
-

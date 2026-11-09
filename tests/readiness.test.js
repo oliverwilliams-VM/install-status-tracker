@@ -12,12 +12,41 @@ const now=Date.parse('2026-10-28T10:00:00Z');
 const binding={id:'request-a',store:'999999',country:'UK',boardId:'5678172488',itemId:'12345',installDate:'2026-11-07',installType:'sfk',projectType:'trading'};
 const answers={name:'Demo',team:'yes',area:'yes',powerData:'yes',peds:'yes',floorplan:'yes',table:'yes',tableDelivery:'',comments:'Ready'};
 const credentials={tokenHash:'a'.repeat(64),revision:1};
-const create=()=>reduce(null,{operation:'issue',binding,fzeEmail:'fze@example.test',mfpEmail:'mfp@example.test',sourceVerified:true,...credentials,expires:now+864000000,sourceReference:{brainItemId:'42'}},now).record;
+const create=()=>reduce(null,{operation:'issue',binding,fzeEmail:'fze@example.test',mfpEmail:'mfp@example.test',hfpEmail:'hfp@example.test',sourceVerified:true,...credentials,expires:now+864000000,sourceReference:{brainItemId:'42'}},now).record;
 const command=(operation,more={})=>({operation,...credentials,...more});
-test('calendar schedule crosses months/leap days without DST drift',()=>{assert.deepEqual(milestones('2026-11-07').map(x=>x.date),['2026-10-28','2026-10-31','2026-11-02']);assert.equal(plusDays('2028-03-01',-1),'2028-02-29');assert.equal(londonToday(new Date('2026-07-01T23:30:00Z')),'2026-07-02');assert.throws(()=>plusDays('2026-02-30',1));});
+test('calendar schedule crosses months/leap days without DST drift',()=>{assert.deepEqual(milestones('2026-11-07').map(x=>x.date),['2026-10-28','2026-10-31','2026-11-02','2026-11-03','2026-11-04']);assert.equal(plusDays('2028-03-01',-1),'2028-02-29');assert.equal(londonToday(new Date('2026-07-01T23:30:00Z')),'2026-07-02');assert.throws(()=>plusDays('2026-02-30',1));});
 test('unknown market and cross-country binding blocked',()=>{assert.equal(market('IRL'),'IE');assert.throws(()=>market('FR'));assert.throws(()=>validateBinding({...binding,country:'NL'}));});
-test('initial and two chasers; MFP only on final milestone',()=>{let r=create();assert.equal(planReminder(r,'2026-10-27').state,'waiting');let p=planReminder(r,'2026-10-28');assert.equal(p.stage,'invite');assert.equal(p.cc,'');r.sent.invite={date:'2026-10-28'};p=planReminder(r,'2026-10-31');assert.equal(p.stage,'chase1');assert.equal(p.copyMfp,false);r.sent.chase1={date:'2026-10-31'};p=planReminder(r,'2026-11-02');assert.equal(p.stage,'chase2');assert.equal(p.cc,r.mfpEmail);});
-test('late intake consolidates overdue reminders and no same-day burst',()=>{let r=create();let p=planReminder(r,'2026-11-03');assert.equal(p.stage,'invite');assert.equal(p.late,true);assert.equal(p.copyMfp,true);r.sent.invite={date:'2026-11-03'};assert.equal(planReminder(r,'2026-11-03').state,'waiting');});
+test('readiness warnings escalate from FZE to MFP and HFP before stand-down',()=>{
+ const r=create();
+ assert.equal(planReminder(r,'2026-10-27').state,'waiting');
+ for(const [date,stage,cc] of [
+  ['2026-10-28','invite',''],
+  ['2026-10-31','chase1',''],
+  ['2026-11-02','chase2',r.mfpEmail],
+  ['2026-11-03','finalWarning',r.mfpEmail+', '+r.hfpEmail],
+ ]){
+  const plan=planReminder(r,date);
+  assert.equal(plan.stage,stage);
+  assert.equal(plan.cc,cc);
+  r.sent[stage]={date};
+ }
+ assert.equal(planReminder(r,'2026-11-04').state,'standDown');
+ assert.equal(planReminder({...r,submitted:true},'2026-11-04').state,'stopped');
+ assert.throws(()=>reduce(r,{operation:'reserveMail',today:'2026-11-04'},now),/not due/);
+});
+test('late intake uses one current warning and blocks a missing or malformed HFP',()=>{
+ const r=create();
+ const day='2026-11-03';
+ const plan=planReminder(r,day);
+ assert.equal(plan.stage,'finalWarning');
+ assert.equal(plan.cc,'mfp@example.test, hfp@example.test');
+ for(const hfpEmail of [undefined,'bad,recipient@example.test']){
+  assert.equal(planReminder({...r,hfpEmail},day).state,'blocked');
+ }
+ r.sent.finalWarning={date:day};
+ assert.equal(planReminder(r,day).state,'waiting');
+ assert.equal(planReminder(create(),'2026-11-05').state,'standDown');
+});
 test('missing escalation recipient blocks; completed/cancelled stop',()=>{let r=create();r.mfpEmail='';assert.equal(planReminder(r,'2026-11-02').state,'blocked');for(const flag of ['completed','cancelled','submitted'])assert.equal(planReminder({...create(),[flag]:true},'2026-11-02').state,'stopped');assert.equal(planReminder(create(),'2026-11-07').state,'stopped');});
 test('SFK-only question and incomplete answers validated',()=>{assert.equal(validateAnswers(answers,'other').table,'na');assert.throws(()=>validateAnswers({...answers,table:''},'sfk'));assert.throws(()=>validateAnswers({...answers,team:''},'sfk'));assert.throws(()=>validateAnswers({...answers,name:' '},'sfk'));assert.deepEqual(blockers({...answers,powerData:'no'},'sfk'),['Power and data']);});
 test('submission reservation and verified receipt stop chasers despite blockers',()=>{let r=create();const c=command('beginSubmission',{submissionId:'submission-123456',digest:'digest',answers:{...answers,peds:'no'}});let v=reduce(r,c,now);assert.equal(v.result.reserved,true);r=v.record;assert.equal(reduce(r,c,now).result.pending,true);assert.throws(()=>reduce(r,{...c,submissionId:'submission-different'},now));assert.throws(()=>reduce(r,command('commitSubmission',{submissionId:c.submissionId,digest:'digest'}),now));v=reduce(r,command('commitSubmission',{submissionId:c.submissionId,digest:'digest',archiveId:'archive',mondayItemId:'77',files:[]}),now);r=v.record;assert.equal(r.submitted,true);assert.deepEqual(v.result.blockers,['PEDs received']);assert.equal(planReminder(r,'2026-10-31').state,'stopped');assert.equal(reduce(r,c,now).result.completed,true);assert.throws(()=>reduce(r,{...c,digest:'different'},now));});
@@ -25,7 +54,7 @@ test('reschedule keeps history, resets milestones and invalidates old links',()=
 test('mail reservation blocks parallel sender/submission; draft is not Sent',()=>{let r=create();const p=planReminder(r,'2026-10-28');r=reduce(r,{operation:'reserveMail',today:'2026-10-28',key:p.key},now).record;assert.throws(()=>reduce(r,{operation:'reserveMail',today:'2026-10-28',key:p.key},now));assert.throws(()=>reduce(r,command('beginSubmission',{submissionId:'submission-123456',digest:'a',answers}),now));assert.throws(()=>reduce(r,{operation:'confirmSent',key:p.key,sentMessageId:'draft',today:'2026-10-28'},now));r=reduce(r,{operation:'confirmSent',key:p.key,sentMessageId:'sent-message',receiptVerified:true,today:'2026-10-28'},now).record;assert.equal(planReminder(r,'2026-10-28').state,'waiting');});
 test('recipient response never exposes VM notes or email addresses',()=>{let r=create();r=reduce(r,{operation:'note',author:'VM',text:'Private operational note',visibility:'internal'},now).record;const opened=reduce(r,command('open'),now).result;assert.equal(opened.notes,undefined);assert.equal(opened.fzeEmail,undefined);assert.equal(opened.mfpEmail,undefined);assert.equal(opened.tokenHash,undefined);});
 test('signed links reject tampering expiry replacement and weak configuration',()=>{const secret='s'.repeat(40),token=issueToken({id:'request-a',revision:1,expires:now+1000},secret);assert.equal(verifyToken(token,secret,now).id,'request-a');assert.equal(verifyToken(token,secret,now).tokenHash,hash(token));assert.throws(()=>verifyToken(token+'x',secret,now));assert.throws(()=>verifyToken(token,secret,now+1000));assert.throws(()=>issueToken({id:'a',revision:1,expires:now},'weak'));});
-test('three languages and four countries have complete matching copy',()=>{const keys=Object.keys(copyFor('UK')).sort();for(const country of ['UK','IE','NL','DE']){assert.deepEqual(Object.keys(copyFor(country)).sort(),keys);const r={...create(),binding:{...binding,country}};for(const stage of ['invite','chase1','chase2']){const mail=emailPreview(r,{stage,copyMfp:stage==='chase2'},'https://example.test/#access=abc');assert.ok(mail.subject.includes(binding.store));assert.equal(mail.cc,stage==='chase2'?r.mfpEmail:'');assert.ok(!mail.html.includes('undefined'));}}assert.throws(()=>emailPreview(create(),{stage:'invite'},'javascript:alert(1)'));});
+test('three languages and four countries have complete matching copy',()=>{const keys=Object.keys(copyFor('UK')).sort();for(const country of ['UK','IE','NL','DE']){assert.deepEqual(Object.keys(copyFor(country)).sort(),keys);const r={...create(),binding:{...binding,country}};for(const stage of ['invite','chase1','chase2','finalWarning']){const mail=emailPreview(r,{stage,copyMfp:stage==='chase2'},'https://example.test/#access=abc');assert.ok(mail.subject.includes(binding.store));assert.equal(mail.cc,stage==='chase2'?r.mfpEmail:'');assert.ok(!mail.html.includes('undefined'));}}assert.throws(()=>emailPreview(create(),{stage:'invite'},'javascript:alert(1)'));});
 test('photo count size and magic bytes validated',()=>{assert.deepEqual(validateFiles([]),[]);assert.throws(()=>validateFiles([{}, {}, {}]));assert.throws(()=>validateFiles([{mime:'image/png',name:'a.png',data:Buffer.from('<script>').toString('base64')}]));const bytes=Buffer.from('89504e470d0a1a0a0000','hex');assert.equal(validateFiles([{mime:'image/png',name:'photo.png',data:bytes.toString('base64')}]).length,1);});
 test('snapshot distinguishes date/progress changes and removals',()=>{const a=[{id:'1',store:'100',outcome:'Booked',installDate:'2026-11-01'},{id:'2',store:'200'}],b=[{...a[0],outcome:'Live',installDate:'2026-11-02'}];assert.equal(snapshotChanges(a,b).length,3);});
 test('coordinator disabled by default; untrusted URL rejected',async()=>{await assert.rejects(rpc({}, {env:{}}));await assert.rejects(rpc({}, {env:{READINESS_BACKEND_ENABLED:'YES',READINESS_RPC_SECRET:'s'.repeat(40),READINESS_COORDINATOR_URL:'https://evil.test/'}}));});
@@ -43,6 +72,34 @@ function coordinatorHarness({failMetadata=false,brainOpening='Retrofit',signupOp
  let n=0;
  return {context,get creates(){return creates;},read:()=>JSON.parse(folders.get('state')[0].contents),call(c,fixedNonce){const nonce=fixedNonce||(++n).toString(16).padStart(64,'0'),timestamp=now,payload=JSON.stringify(c),w={nonce,timestamp,payload,mac:mac('s'.repeat(40),timestamp+'\n'+nonce+'\n'+payload)};return JSON.parse(JSON.parse(context.doPost({postData:{contents:JSON.stringify(w)}})).payload);}};
 }
+test('Apps Script final warning rechecks recipients before reserving or sending',()=>{
+ const {context}=coordinatorHarness();
+ const file=context.DriveApp.getFolderById('state').getFilesByName('request-a.json').next();
+ const properties=context.PropertiesService.getScriptProperties();
+ properties.setProperty('RD_SEND_APPROVED','YES');
+ context.Utilities.formatDate=()=> '2026-11-03';
+ let verified=false,sends=0;
+ context.RD_verifySource_=c=>{
+  assert.equal(c.hfpEmail,'hfp@example.test');
+  if(!verified)throw Error('HFP source mismatch');
+ };
+ const send=(mail)=>{
+  sends++;
+  assert.equal(mail.cc,'mfp@example.test, hfp@example.test');
+  assert.equal(JSON.parse(file.contents).pendingMail.stage,'finalWarning');
+  return {sentMessageId:'warning-id',receiptVerified:true};
+ };
+ const dispatch=()=>context.RD_dispatchWithExistingSender('request-a','https://example.test/',send);
+ assert.throws(dispatch,/HFP source mismatch/);
+ assert.equal(sends,0);
+ assert.equal(JSON.parse(file.contents).pendingMail,null);
+ verified=true;
+ assert.equal(dispatch().confirmed,true);
+ assert.equal(dispatch().state,'waiting');
+ context.Utilities.formatDate=()=> '2026-11-04';
+ assert.equal(dispatch().state,'standDown');
+ assert.equal(sends,1);
+});
 test('coordinator end-to-end archives and files once, retains comments, rejects RPC replay',()=>{
  const h=coordinatorHarness(),c=command('submit',{id:'request-a',submissionId:'submission-123456',answers,files:[],digest:'digest'});
  let result=h.call(c);assert.equal(result.ok,true,JSON.stringify(result));assert.equal(h.creates,1);assert.equal(h.read().history[0].answers.comments,'Ready');assert.equal(h.read().submitted,true);

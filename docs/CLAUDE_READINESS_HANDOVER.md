@@ -16,19 +16,19 @@ Read the current deployed Brain Apps Script and trigger inventory before prepari
 
 ## Sending pattern
 
-All offsets are calendar days from the verified booked installation date, using Europe/London calendar dates. Reuse the existing readiness scheduler. Exact execution hour and existing sender identity must be established from deployed configuration; neither is newly agreed here.
+The review branch uses the tracker’s existing Europe/London calendar-day offsets. The scheduler handover also refers to working-day rules. Confirm the production calendar policy, execution time and sender before cutover.
 
 | When | To | CC | Condition |
 |---|---|---|---|
-| Install minus 10 days | Verified FZE | None added by readiness | Initial personalised portal request |
-| Install minus 7 days | Same verified FZE | None added by readiness | No submitted response; first chase, three days after planned initial request |
-| Install minus 5 days | Same verified FZE | Verified store-specific MFP | No submitted response; final chase, two days after planned first chase |
+| Install minus 10 days | Verified FZE | None | Initial personalised portal request |
+| Install minus 7 days | Same verified FZE | None | No submitted response |
+| Install minus 5 days | Same verified FZE | Verified MFP | No submitted response. Give 24 hours to respond. |
+| Install minus 4 days | Same verified FZE | Verified MFP and HFP | No submitted response. Final warning. |
+| Install minus 3 days | Internal decision | None | Surface an outstanding response for cancellation and Apex stand-down. |
 
-Use English for UK/IE, Dutch for NL, German for DE. Include the bound restaurant, booked date, appropriate Installation Hub guides and secure portal link. Review actual rendered subjects/bodies in the Emails & timing tab and src/readiness/copy.js before live delivery. No new operational promises or additional chase cadence is approved.
+Review the warning copy in English, Dutch and German. The planner's stand-down result is a decision signal. Wire the production booking cancellation and Apex stand-down separately and verify both effects before enabling the workflow. A submitted response stops non-response chasers. Outstanding preparations are routed for VM follow-up.
 
-A valid submission stops non-response chasers even if the store has outstanding preparations. Those issues remain visible for VM follow-up; submission is not installation approval. A correction report about project type holds the form and future reminders pending source correction.
-
-Do not send after installation has started, gone live, completed, been cancelled or postponed. Missing verified FZE blocks delivery; missing verified MFP blocks final escalation. Never substitute a default address. Late entry sends one current consolidated request, with MFP copied at/after minus 5, not a backlog of overdue emails. Maximum one message per installation per calendar day. Missed stages collapse to the latest due stage. Rescheduling re-verifies source, preserves history, increments revision and invalidates the previous link. Do not replay while a send/write outcome is uncertain.
+Keep the verified installation and booking revision as the basis for all actions. Late entries use the latest applicable stage and never send a backlog of overdue messages. The final warning is held if its verified MFP or HFP recipient is missing. Set `RD_SOURCE_MAP.hfpEmailColumn` only after verifying the live source. Reconcile old request records with that source before cutover. Never assume that a late warning provided a full notice period.
 
 Record delivery only after independently verified Gmail Sent receipt. Draft creation or a successful send attempt alone is not proof. Keep durable reservations/idempotency and reconcile uncertain results before retrying.
 
@@ -57,7 +57,7 @@ Deploy the supplied readiness coordinator in its own Apps Script project without
 
 1. Identify deployed sender/trigger inventory, exact source fields, recipient resolution and existing open requests. Document the precise integration diff.
 2. Test bound links and responses for UK, IE, NL and DE; NRO, Remodel and trading; SFK and other hardware. Confirm order-date capture and mandatory validation, translations, wrong-type report, dates and acknowledgement.
-3. Test minus 10/7/5, late entry, missing recipients, submitted-but-blocked store, cancelled/live/partial/aborted cases, duplicate/concurrent runs, reschedule and expired/old links. Confirm no unintended email and no duplicate filing.
+3. Test minus 10/7/5/4/3, late entry, missing recipients, submitted-but-blocked store, cancelled/live/partial/aborted cases, duplicate/concurrent runs, reschedule and expired/old links. Confirm no unintended email and no duplicate filing.
 4. Verify real internal test writes, private photos, Monday history/comments, operational PED/shipping/notes and verified Sent receipts. Automated mocks do not certify this step.
 5. Reconcile legacy submissions and pending chasers. Present final email copy, mapping table, test evidence, proposed cutover and rollback to Oliver before activating live sending.
 6. At approved cutover switch only readiness links/scheduling, close old forms to new submissions, retain history and monitor first sends/responses. No automatic replay of historical chasers.

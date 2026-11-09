@@ -54,6 +54,7 @@ function RD_verifySource_(c,p,previous){
  var links=values[m.installLinkColumn];if(!links||!links.linked_item_ids||links.linked_item_ids.length!==1||String(links.linked_item_ids[0])!==String(binding.itemId))throw Error('Exact installation relationship required');
  var country=market((values[m.countryColumn]||{}).text);if(country!==market(binding.country))throw Error('Market mismatch');
  if(c.operation==='issue'&&((values[m.fzeEmailColumn]||{}).text!==c.fzeEmail||(values[m.mfpEmailColumn]||{}).text!==c.mfpEmail||String(item.name).trim()!==binding.store))throw Error('Recipient/store source mismatch');
+ if(c.operation==='issue'&&c.hfpEmail&&(!m.hfpEmailColumn||(values[m.hfpEmailColumn]||{}).text!==c.hfpEmail))throw Error('HFP source mismatch');
  var value=JSON.parse((values[m.installDateColumn]||{}).value||'null');if(!value||value.date!==binding.installDate)throw Error('Install date changed');
  var evidence=RD_projectEvidence_(item,p);
  if(binding.projectType!==evidence.projectType||binding.installType!==evidence.installType)throw Error('Invitation context differs from Monday');
@@ -100,6 +101,7 @@ function RD_dispatchWithExistingSender(recordId,portalUrl,sender){
   var folder=DriveApp.getFolderById(p.getProperty('RD_STATE_FOLDER_ID')),file=RD_find_(folder,recordId+'.json');if(!file)throw Error('Request missing');
   var r=JSON.parse(file.getBlob().getDataAsString());RD_assertCurrent_(r,p);var today=Utilities.formatDate(new Date(),'Europe/London','yyyy-MM-dd'),plan=planReminder(r,today);
   if(plan.state!=='due')return plan;
+  if(plan.stage==='finalWarning')RD_verifySource_({operation:'issue',binding:r.binding,brainItemId:r.sourceReference&&r.sourceReference.brainItemId,fzeEmail:r.fzeEmail,mfpEmail:r.mfpEmail,hfpEmail:r.hfpEmail},p);
   var reserved=reduce(r,{operation:'reserveMail',today:today,key:plan.key},Date.now());file.setContent(JSON.stringify(reserved.record));
   var copy=emailPreview(r,plan,portalUrl),receipt=sender(copy,plan.key);
   if(!receipt||!receipt.receiptVerified||!receipt.sentMessageId)throw Error('Outcome uncertain; reconcile Gmail Sent before retry');
