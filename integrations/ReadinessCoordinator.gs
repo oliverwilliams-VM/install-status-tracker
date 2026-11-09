@@ -180,6 +180,9 @@ function RD_projectEvidence_(brain,p,includeRecipients){
  var brainType=(v.color_mm7f7r9d||{}).text;
  var signupType=(s.dup__of_store_type5__1||{}).text;
  var signupProject=(s.label7||{}).text;
+ // LEGO LAND is a concept. Its paired project label must explicitly say Remodel.
+ if(String(signupType||'').trim().toUpperCase()==='LEGO LAND'&&
+    String(signupProject||'').trim().toLowerCase()==='remodel')signupType=signupProject;
  // A missing Brain label can use two agreeing Sign Up fields. An explicit unknown or conflict still holds.
  var raw=brainType?[brainType,signupType]:[signupType,signupProject];
  if(brainType&&signupProject)raw.push(signupProject);

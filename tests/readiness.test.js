@@ -267,12 +267,12 @@ test('wrong-project report is credential-bound, idempotent and stops reminders/s
 test('verified context correction replaces link and clears current answers while preserving history',()=>{let r=create();r=reduce(r,command('reportProjectMismatch',{reason:'This is a remodel.'}),now).record;const c={operation:'rebindContext',sourceVerified:true,binding:{...binding,projectType:'remodel'},sourceReference:{brainItemId:'42'},tokenHash:'b'.repeat(64),expires:now+900000000};assert.throws(()=>reduce(r,{...c,sourceVerified:false},now));assert.throws(()=>reduce(r,{...c,binding:{...c.binding,itemId:'999'}},now));const corrected=reduce(r,c,now).record;assert.equal(corrected.revision,2);assert.equal(corrected.binding.projectType,'remodel');assert.equal(corrected.projectTypeIssue,null);assert.equal(corrected.submitted,false);assert.equal(corrected.history[1].previousIssue.reason,'This is a remodel.');assert.throws(()=>reduce(corrected,command('open'),now));});
 test('coordinator rechecks current Brain/Sign Up project and kiosk data on opening',()=>{for(const config of [{brainOpening:'TBD'},{signupOpening:'NRO'},{signupProject:'Remodel'},{kiosk:'Unknown kiosk'}]){const h=coordinatorHarness(config);assert.equal(h.call(command('open',{id:'request-a'})).ok,false);}assert.equal(coordinatorHarness().call(command('open',{id:'request-a'})).ok,true);});
 test('a blank Brain project type needs two agreeing Sign Up labels',()=>{
- for(const config of [{brainOpening:'',signupOpening:'Re-Model',signupProject:'Remodel'},{brainOpening:'',signupOpening:'Retrofit',signupProject:'Retro - Fresh Forward'}]){
+ for(const config of [{brainOpening:'',signupOpening:'Re-Model',signupProject:'Remodel'},{brainOpening:'',signupOpening:'Retrofit',signupProject:'Retro - Fresh Forward'},{brainOpening:'',signupOpening:'LEGO LAND',signupProject:'Remodel'}]){
   const h=coordinatorHarness(config);
   const item=h.context.RD_monday_('query{items}',{ids:['42']},h.context.PropertiesService.getScriptProperties()).items[0];
   assert.doesNotThrow(()=>h.context.RD_projectEvidence_(item,h.context.PropertiesService.getScriptProperties()));
  }
- for(const config of [{brainOpening:'',signupOpening:'LEGO LAND',signupProject:'Remodel'},{brainOpening:'',signupOpening:'Retrofit',signupProject:''}]){
+ for(const config of [{brainOpening:'',signupOpening:'LEGO LAND',signupProject:'Retro - Fresh Forward'},{brainOpening:'',signupOpening:'Retrofit',signupProject:''}]){
   const h=coordinatorHarness(config);
   const item=h.context.RD_monday_('query{items}',{ids:['42']},h.context.PropertiesService.getScriptProperties()).items[0];
   assert.throws(()=>h.context.RD_projectEvidence_(item,h.context.PropertiesService.getScriptProperties()),/unsupported Monday project type/);
