@@ -113,7 +113,8 @@ export function joinTracker(raw, health = {}) {
       const store = row.name.trim();
       if (!/^\d{5}$/.test(store)) continue;
       const installDate = date(row,config.date);
-      const signupLinks = links(row,config.signup);
+      const relatedItems = links(row,config.signup);
+      const signupLinks = relatedItems.length > 1 ? relatedItems.filter(id => signups.has(id)) : relatedItems;
       const signup = signupLinks.length === 1 ? signups.get(signupLinks[0]) : null;
       const candidates = signupLinks.length === 1 ? brainBySignup.get(signupLinks[0]) || [] : [];
       const brain = candidates.length === 1 ? candidates[0] : null;

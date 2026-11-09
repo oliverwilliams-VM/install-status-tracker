@@ -54,3 +54,12 @@ test('a dated Brain outcome distinguishes a clean revisit from a current install
  assert.equal(run(brain('Installed'),[noPeds]).outcome,'Installed with outstanding items');
  assert.equal(run(brain('Installed','2026-10-20'),[old]).outcome,'Installed with outstanding items');
 });
+
+test('mixed board links use the one verified Sign Up item without accepting ambiguous Sign Up links',()=>{
+ const job={...site,column_values:site.column_values.filter(v=>v.id!==c.signup).concat(cell(c.signup,'',null,['other','signup']))};
+ const brain={id:'brain-job',column_values:[cell('board_relation_mm7s293s','',null,['signup']),cell('long_text_mm8xk5vw','Readiness follow-up')]};
+ const withSignup=signup=>joinTracker({UK:[job],brain:[brain],signup}).sites[0];
+ assert.equal(withSignup([{id:'signup'}]).vm,'Readiness follow-up');
+ assert.equal(withSignup([{id:'signup'},{id:'other'}]).brainId,'');
+ assert.equal(withSignup([]).brainId,'');
+});
