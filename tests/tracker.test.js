@@ -10,3 +10,22 @@ test('stale responses stay in history and cannot qualify rescheduled work',()=>{
 test('current response keeps power and data separate',()=>{const result=joinTracker({UK:[site],responses:[response('2026-11-16')]});assert.equal(result.sites[0].power,'Yes');assert.equal(result.sites[0].data,'No');});
 test('ambiguous Brian links never supply a signed or ordered milestone',()=>{const brain=id=>({id,column_values:[cell('board_relation_mm7s293s','',null,['signup']),cell('boolean_mm8qvyqt','',{checked:true})]});const result=joinTracker({UK:[site],brain:[brain('one'),brain('two')]});assert.equal(result.sites[0].signed,'Unknown');assert.equal(result.sites[0].sourceWarnings.length,1);});
 test('incident reporting collapses VM suppliers while preserving the three owners',()=>{for(const fault of ['Vita Mojo','Apex','Supplier','Supplier / Apex','P&D contractor'])assert.equal(faultGroup(fault),'VM');assert.equal(faultGroup('Store'),'FZE');assert.equal(faultGroup('Subway'),'Subway');assert.equal(faultGroup(''),'Unassigned');});
+
+test('an upcoming install needs PED receipt evidence even with a Brain or legacy BAU go decision',()=>{
+ const job={...site,column_values:site.column_values.filter(column=>column.id!==c.phase).concat(cell(c.readinessGate,'Ready to Proceed'))};
+ const brain={id:'brain-job',column_values:[
+  cell('board_relation_mm7s293s','',null,['signup']),
+  cell('color_mm8x8cxv','Ready to install'),
+  cell('date_mm8x4m1e','',{date:'2026-11-16'}),
+  cell('boolean_mm8qa0fn','',{checked:true}),
+ ]};
+ for(const brainRows of [[],[brain]]){
+  const raw={UK:[job],brain:brainRows};
+  const unknown=joinTracker(raw).sites[0];
+  assert.equal(unknown.readiness.ready,false);
+  assert.equal(unknown.readiness.reason,'Confirm PED receipt for this installation');
+  const delivered={...job,column_values:[...job.column_values,cell(c.pedStatus,'PEDs delivered')]};
+  assert.equal(joinTracker({...raw,UK:[delivered]}).sites[0].readiness.ready,true);
+ }
+ assert.equal(joinTracker({UK:[site]}).sites[0].readiness.label,'Complete');
+});
