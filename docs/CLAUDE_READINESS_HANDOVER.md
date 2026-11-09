@@ -56,7 +56,7 @@ Deploy the supplied readiness coordinator in its own Apps Script project without
 ## Recipient portal and invitation transport
 
 - Build `dist/ReadinessPortal.html` with `node scripts/build-readiness-portal.js`. Install it as `ReadinessPortal.html` in the standalone coordinator, with `ReadinessRecipient.gs` and `ReadinessGmailSender.gs`. Keep the protected tracker separate. The Apps Script recipient page receives the credential in the URL fragment and validates it before calling the existing signed coordinator.
-- Add the Gmail advanced service for exact Gmail Sent metadata. Authorize it as `subway.emea` and rehearse one internal invitation before enabling production sending. A successful send alone is insufficient: the adapter requires the exact returned message ID, the SENT label, sender, subject and recipient headers.
+- Install the explicit `integrations/appsscript.json` manifest for Gmail send and metadata-only access. Authorize it as `subway.emea` and rehearse one internal invitation before enabling production sending. A successful send alone is insufficient: the adapter requires the exact returned message ID, the SENT label, sender, subject and recipient headers.
 - Set `RD_PORTAL_URL` to the approved coordinator web-app URL. Keep `RD_PORTAL_ENABLED`, `RD_SEND_APPROVED`, `RD_WRITES_APPROVED` and stand-down approval off through staging. The existing scheduled worker uses the reviewed cohort and can send only when the portal, signed backend, submission writes and sending are all enabled. Reconcile uncertain mail before retry.
 - Verify a fictional signed link in a signed-out browser, file a test response with an attachment, and reconcile the mail receipt before enabling live invitations.
 

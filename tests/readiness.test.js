@@ -268,6 +268,40 @@ test('Gmail receipt must identify the exact Sent message and recipients',()=>{
  proof.payload.headers[2].value='mfp@example.test';
  assert.equal(check(proof),false);
 });
+test('readiness mail sends MIME through the Gmail API with send and metadata scopes',()=>{
+ const {context}=coordinatorHarness();
+ context.Session={getEffectiveUser:()=>({getEmail:()=> 'subway.emea@vitamojo.com'})};
+ Object.assign(context.Utilities,{
+  getUuid:()=> 'fixture-uuid',newBlob:value=>({getBytes:()=>Buffer.from(value)}),
+  base64Encode:value=>Buffer.from(value).toString('base64'),
+  base64EncodeWebSafe:value=>Buffer.from(value).toString('base64url'),
+ });
+ const copy={to:'fze@example.test',cc:'mfp@example.test',subject:'Readiness — café',text:'test text',html:'<p>test HTML</p>'};
+ context.Gmail={Users:{Messages:{
+  send:({raw},user)=>{
+   assert.equal(user,'me');
+   const mime=Buffer.from(raw,'base64url').toString();
+   assert.match(mime,/To: fze@example.test\r\nCc: mfp@example.test/);
+   assert.match(mime,/multipart\/alternative/);
+   assert.match(mime,/Subject: =\?UTF-8\?B\?/);
+   return {id:'message-id'};
+  },
+  get:(user,id,options)=>{
+   assert.equal(user,'me');assert.equal(id,'message-id');assert.equal(options.format,'metadata');
+   return {id,labelIds:['SENT'],payload:{headers:[
+    {name:'From',value:'subway.emea@vitamojo.com'},{name:'To',value:copy.to},
+    {name:'Cc',value:copy.cc},{name:'Subject',value:context.RD_gmailSubject_(copy.subject)},
+   ]}};
+  },
+ }}};
+ assert.equal(context.RD_sendGmailVerified_(copy).receiptVerified,true);
+ assert.throws(()=>context.RD_sendGmailVerified_({...copy,to:'wrong@example.test\r\nBcc: hidden@example.test'}),/Invalid mail headers/);
+ const manifest=JSON.parse(fs.readFileSync('integrations/appsscript.json','utf8'));
+ assert.deepEqual(manifest.oauthScopes.filter(scope=>scope.includes('/gmail.')),[
+  'https://www.googleapis.com/auth/gmail.send','https://www.googleapis.com/auth/gmail.metadata',
+ ]);
+ assert.equal(manifest.oauthScopes.includes('https://mail.google.com/'),false);
+});
 test('anonymous calls cannot invoke the installed readiness worker',()=>{
  const {context}=coordinatorHarness();
  context.ScriptApp={getProjectTriggers:()=>[{getHandlerFunction:()=> 'RD_runStandDownWorker',getUniqueId:()=> '1234567890'}]};

@@ -12,14 +12,47 @@ function RD_portalLink_(record,p) {
 function RD_sendGmailVerified_(copy) {
   const owner='subway.emea@vitamojo.com';
   if(Session.getEffectiveUser().getEmail().toLowerCase()!==owner||typeof Gmail==='undefined')throw Error('Approved Gmail sender required');
-  const opts={htmlBody:copy.html};
-  if(copy.cc)opts.cc=copy.cc;
-  const sent=GmailApp.createDraft(copy.to,copy.subject,copy.text,opts).send();
-  const id=sent.getId();
+  const raw=RD_gmailMime_(copy,owner);
+  const sent=Gmail.Users.Messages.send({raw},'me');
+  const id=sent&&sent.id;
+  if(!id)throw Error('Gmail send returned no message ID');
   const headers=['From','To','Cc','Subject'];
   const proof=Gmail.Users.Messages.get('me',id,{format:'metadata',metadataHeaders:headers});
   if(!RD_matchesGmailReceipt_(proof,id,copy,owner))throw Error('Gmail Sent receipt unconfirmed');
   return {sentMessageId:id,receiptVerified:true};
+}
+
+function RD_gmailMime_(copy,owner) {
+  const mailbox=/^[^\s@,<>]+@[^\s@,<>]+\.[^\s@,<>]+$/;
+  if(!mailbox.test(owner)||!mailbox.test(copy.to)||
+     (copy.cc&&!copy.cc.split(',').every(part=>mailbox.test(part.trim())))||
+     typeof copy.subject!=='string'||!copy.subject||/[\r\n]/.test(copy.subject))throw Error('Invalid mail headers');
+  const boundary='rd_'+Utilities.getUuid().replace(/-/g,'');
+  const headers=['From: '+owner,'To: '+copy.to];
+  if(copy.cc)headers.push('Cc: '+copy.cc);
+  headers.push('Subject: '+RD_gmailSubject_(copy.subject),'MIME-Version: 1.0',
+    'Content-Type: multipart/alternative; boundary="'+boundary+'"','');
+  const parts=[['text/plain',copy.text],['text/html',copy.html]].flatMap(([type,body])=>{
+    const encoded=Utilities.base64Encode(body,Utilities.Charset.UTF_8);
+    return ['--'+boundary,'Content-Type: '+type+'; charset=UTF-8',
+      'Content-Transfer-Encoding: base64','',(encoded.match(/.{1,76}/g)||[]).join('\r\n')];
+  });
+  return Utilities.base64EncodeWebSafe([...headers,'',...parts,'--'+boundary+'--',''].join('\r\n'),Utilities.Charset.UTF_8).replace(/=+$/,'');
+}
+
+function RD_gmailSubject_(subject){
+  if(/^[ -~]{1,68}$/.test(subject))return subject;
+  const words=[];
+  let chunk='';
+  for(const char of subject){
+    if(Utilities.newBlob(chunk+char).getBytes().length>42){
+      words.push('=?UTF-8?B?'+Utilities.base64Encode(chunk,Utilities.Charset.UTF_8)+'?=');
+      chunk='';
+    }
+    chunk+=char;
+  }
+  if(chunk)words.push('=?UTF-8?B?'+Utilities.base64Encode(chunk,Utilities.Charset.UTF_8)+'?=');
+  return words.join('\r\n ');
 }
 
 function RD_matchesGmailReceipt_(message,id,copy,owner) {
@@ -40,7 +73,12 @@ function RD_matchesGmailReceipt_(message,id,copy,owner) {
   }
   const cc=addresses(header('cc')),to=addresses(copy.to);
   return Boolean(to)&&addresses(header('from'))===owner&&addresses(header('to'))===to&&
-    cc!==null&&cc===addresses(copy.cc||'')&&header('subject')===copy.subject;
+    cc!==null&&cc===addresses(copy.cc||'')&&RD_matchesGmailSubject_(header('subject'),copy.subject);
+}
+
+function RD_matchesGmailSubject_(actual,expected){
+  if(actual===expected)return true;
+  return typeof actual==='string'&&actual.replace(/\r?\n[ \t]+/g,' ')===RD_gmailSubject_(expected).replace(/\r?\n[ \t]+/g,' ');
 }
 
 function RD_runReadinessMailWorker_() {
