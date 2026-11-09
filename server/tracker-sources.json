@@ -146,6 +146,7 @@
     {
       "key": "legacyUKI",
       "id": "18379251681",
+      "englishComments": "long_text_mm8y13j6",
       "markets": [
         "UK",
         "IE"
@@ -154,6 +155,7 @@
     {
       "key": "legacyDE",
       "id": "18391075175",
+      "englishComments": "long_text_mm8ykq6h",
       "markets": [
         "DE"
       ]
@@ -161,6 +163,7 @@
     {
       "key": "legacyNL",
       "id": "18396748434",
+      "englishComments": "long_text_mm8ynt92",
       "markets": [
         "NL"
       ]

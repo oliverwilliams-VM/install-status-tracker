@@ -176,8 +176,12 @@ export function joinTracker(raw, health = {}) {
     }
   }
   const manualRows=(raw.manualEvidence||[]).flatMap(row=>{try{const a=JSON.parse(text(row,sources.manualEvidence.columns['Evidence JSON']));return [{...a,ledgerUrl:rowUrl(sources.manualEvidence.id,row.id)}];}catch{return [];}});
-  const oldForms=(sources.legacyForms||[]).flatMap(board=>(raw[board.key]||[]).map(row=>({id:String(row.id),boardId:board.id,markets:board.markets,store:text(row,'short_textjluohkcj'),createdAt:row.created_at,formDate:date(row,'dateil43at5z'),ped:text(row,'single_selectdfcews6'),powerData:text(row,'single_selectyvczs4q'),comments:text(row,'long_textre3ommqp'),url:rowUrl(board.id,row.id)})));
-  oldForms.push(...manualRows.filter(a=>a.scope==='original-fze-response'&&a.form).map(a=>a.form));
+  const oldForms=(sources.legacyForms||[]).flatMap(board=>(raw[board.key]||[]).map(row=>({id:String(row.id),boardId:board.id,markets:board.markets,store:text(row,'short_textjluohkcj'),createdAt:row.created_at,formDate:date(row,'dateil43at5z'),ped:text(row,'single_selectdfcews6'),powerData:text(row,'single_selectyvczs4q'),comments:text(row,'long_textre3ommqp'),english:text(row,board.englishComments),url:rowUrl(board.id,row.id)})));
+  const liveForms = new Map(oldForms.map(form => [form.boardId+':'+form.id, form]));
+  oldForms.push(...manualRows.filter(a=>a.scope==='original-fze-response'&&a.form).map(({form})=>{
+    const live = liveForms.get(form.boardId+':'+form.id);
+    return live?.english && live.comments === form.comments ? {...form,english:live.english} : form;
+  }));
   for (const site of sites) {
     applyLegacyEvidence(site, manualRows, oldForms);
     if (site.readiness.ready && site.readiness.source !== 'outcome' && !['Yes', 'Not required'].includes(site.received)) {
@@ -197,7 +201,7 @@ export async function loadTracker({token,fetchImpl=fetch}={}) {
   const specs = [...Object.entries(sources.countries).map(([key,b])=>[key,b.id,fieldList(b)]),
     ['brain',BRAIN_ID,BRAIN_COLUMNS],['signup','5678025992',SIGNUP_COLUMNS],
     ['responses',sources.responses.id,Object.values(sources.responses.columns).filter(c=>c!=='name')],
-    ['incidents',sources.incidents.id,Object.values(sources.incidents.columns)],['manualEvidence',sources.manualEvidence.id,Object.values(sources.manualEvidence.columns).filter(c=>c!=='name')],...sources.legacyForms.map(b=>[b.key,b.id,['short_textjluohkcj','dateil43at5z','single_selectdfcews6','single_selectyvczs4q','long_textre3ommqp']])];
+    ['incidents',sources.incidents.id,Object.values(sources.incidents.columns)],['manualEvidence',sources.manualEvidence.id,Object.values(sources.manualEvidence.columns).filter(c=>c!=='name')],...sources.legacyForms.map(b=>[b.key,b.id,['short_textjluohkcj','dateil43at5z','single_selectdfcews6','single_selectyvczs4q','long_textre3ommqp',b.englishComments]])];
   const results = await Promise.allSettled(specs.map(async ([key,id,columns])=>[key,await readBoard(id,columns,options)]));
   const raw = {}, health = {};
   results.forEach((result,i)=>{const key=specs[i][0];health[key]={ok:result.status==='fulfilled',at:new Date().toISOString()};if(result.status==='fulfilled')raw[key]=result.value[1];else health[key].message='Source unavailable. Refresh or open Monday to verify.';});
