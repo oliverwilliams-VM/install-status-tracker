@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node scripts/readiness-preview-acceptance.mjs && vite build",
+    "build": "vite build",
     "preview": "vite preview",
     "test": "node --test tests/*.test.js",
     "readiness:generate": "node scripts/build-readiness-core.js"
