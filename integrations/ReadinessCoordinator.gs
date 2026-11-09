@@ -177,8 +177,12 @@ function RD_projectEvidence_(brain,p,includeRecipients){
  var signup=RD_monday_('query($ids:[ID!]!){items(ids:$ids){id board{id} column_values{id text value ... on PeopleValue{persons_and_teams{id kind}}}}}',{ids:[String(link.linked_item_ids[0])]},p).items[0];
  if(!signup||String(signup.board.id)!=='5678025992')throw Error('Sign Up source identity mismatch');
  var s={};signup.column_values.forEach(function(c){s[c.id]=c;});
- var raw=[(v.color_mm7f7r9d||{}).text,(s.dup__of_store_type5__1||{}).text];
- if((s.label7||{}).text)raw.push(s.label7.text);
+ var brainType=(v.color_mm7f7r9d||{}).text;
+ var signupType=(s.dup__of_store_type5__1||{}).text;
+ var signupProject=(s.label7||{}).text;
+ // A missing Brain label can use two agreeing Sign Up fields. An explicit unknown or conflict still holds.
+ var raw=brainType?[brainType,signupType]:[signupType,signupProject];
+ if(brainType&&signupProject)raw.push(signupProject);
  function person(column){
   var assigned=(s[column]||{}).persons_and_teams||[];
   return includeRecipients&&assigned.length===1&&assigned[0].kind==='person'?String(assigned[0].id):'';
