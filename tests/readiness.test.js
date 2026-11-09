@@ -59,6 +59,22 @@ test('photo count size and magic bytes validated',()=>{assert.deepEqual(validate
 test('snapshot distinguishes date/progress changes and removals',()=>{const a=[{id:'1',store:'100',outcome:'Booked',installDate:'2026-11-01'},{id:'2',store:'200'}],b=[{...a[0],outcome:'Live',installDate:'2026-11-02'}];assert.equal(snapshotChanges(a,b).length,3);});
 test('coordinator disabled by default; untrusted URL rejected',async()=>{await assert.rejects(rpc({}, {env:{}}));await assert.rejects(rpc({}, {env:{READINESS_BACKEND_ENABLED:'YES',READINESS_RPC_SECRET:'s'.repeat(40),READINESS_COORDINATOR_URL:'https://evil.test/'}}));});
 test('authenticated coordinator rejects modified response',async()=>{const env={READINESS_BACKEND_ENABLED:'YES',READINESS_RPC_SECRET:'s'.repeat(40),READINESS_COORDINATOR_URL:'https://script.google.com/macros/s/abc/exec'};await assert.rejects(rpc({operation:'open'},{env,fetchImpl:async()=>({ok:true,json:async()=>({nonce:'bad',payload:'{}',mac:'bad'})})}));const result=await rpc({operation:'open'},{env,fetchImpl:async(url,opts)=>{const w=JSON.parse(opts.body),payload=JSON.stringify({ok:true,result:{test:true}});return {ok:true,json:async()=>({nonce:w.nonce,payload,mac:mac(env.READINESS_RPC_SECRET,w.nonce+'\n'+payload)})};}});assert.equal(result.test,true);});
+test('preview-only readiness settings accept the staged secret names',async()=>{
+ const {readinessLinkSecret,readinessPortalOrigin}=await import('../server/readiness-env.js');
+ const env={VERCEL_ENV:'preview',VERCEL_URL:'review.example',RD_LINK_SECRET:'l'.repeat(40),RD_RPC_SECRET:'s'.repeat(40),READINESS_BACKEND_ENABLED:'YES',READINESS_COORDINATOR_URL:'https://script.google.com/macros/s/abc/exec'};
+ assert.equal(readinessLinkSecret(env),env.RD_LINK_SECRET);
+ assert.equal(readinessPortalOrigin(env),'https://review.example');
+ const fetchImpl=async(url,opts)=>{
+  const w=JSON.parse(opts.body),payload=JSON.stringify({ok:true,result:{test:true}});
+  assert.equal(w.mac,mac(env.RD_RPC_SECRET,w.timestamp+'\n'+w.nonce+'\n'+w.payload));
+  return {ok:true,json:async()=>({nonce:w.nonce,payload,mac:mac(env.RD_RPC_SECRET,w.nonce+'\n'+payload)})};
+ };
+ assert.deepEqual(await rpc({operation:'open'},{env,fetchImpl}),{test:true});
+ const production={...env,VERCEL_ENV:'production'};
+ assert.equal(readinessLinkSecret(production),undefined);
+ assert.equal(readinessPortalOrigin(production),undefined);
+ await assert.rejects(rpc({operation:'open'},{env:production,fetchImpl}),/not activated/);
+});
 test('recipient endpoint refuses activation by default',async()=>{const saved=process.env.READINESS_BACKEND_ENABLED;delete process.env.READINESS_BACKEND_ENABLED;let status;const res={setHeader(){},status(n){status=n;return this;},json(v){return v;}};try{await handler({method:'POST'},res);assert.equal(status,503);}finally{if(saved)process.env.READINESS_BACKEND_ENABLED=saved;}});
 test('portable Apps Script core has identical schedule and reducer behavior',()=>{const context=vm.createContext({URL,Date,Intl});vm.runInContext(fs.readFileSync('integrations/ReadinessCore.gs','utf8'),context);assert.equal(context.planReminder(create(),'2026-10-28').stage,'invite');assert.equal(context.reduce(create(),command('open'),now).result.binding.store,'999999');assert.equal(context.emailPreview(create(),{stage:'invite'},'https://example.test/').subject.includes('999999'),true);});
 function coordinatorHarness({failMetadata=false,brainOpening='Retrofit',signupOpening='Retrofit',signupProject='Retro - Fresh Forward',kiosk='Small Format Kiosk'}={}){

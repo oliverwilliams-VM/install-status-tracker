@@ -1,5 +1,6 @@
 import {verifyToken,hash} from '../server/token.js';
 import {rpc} from '../server/coordinator.js';
+import {readinessLinkSecret,readinessPortalOrigin} from '../server/readiness-env.js';
 import {validateAnswers} from '../src/readiness/model.js';
 export function validateFiles(files){
  if(!Array.isArray(files)||files.length>4)throw Error('Maximum four photos');
@@ -15,9 +16,9 @@ export default async function handler(req,res){
  if(req.method!=='POST')return res.status(405).json({error:'Method not allowed'});
  if(process.env.READINESS_BACKEND_ENABLED!=='YES')return res.status(503).json({error:'Readiness portal is not activated. Existing forms remain in use.'});
  try{
-  const origin=new URL(process.env.READINESS_PORTAL_ORIGIN);if(origin.protocol!=='https:'||req.headers.origin!==origin.origin)throw Error('Invalid origin');
+  const origin=new URL(readinessPortalOrigin(process.env));if(origin.protocol!=='https:'||req.headers.origin!==origin.origin)throw Error('Invalid origin');
   if(!String(req.headers['content-type']||'').startsWith('application/json'))throw Error('JSON required');
-  const token=String(req.headers.authorization||'').replace(/^Bearer /,''),access=verifyToken(token,process.env.READINESS_LINK_SECRET),b=req.body;
+  const token=String(req.headers.authorization||'').replace(/^Bearer /,''),access=verifyToken(token,readinessLinkSecret(process.env)),b=req.body;
   if(!b||!['open','submit','reportProjectMismatch'].includes(b.operation))throw Error('Invalid operation');
   const c={operation:b.operation,id:access.id,revision:access.revision,tokenHash:access.tokenHash};
   if(b.operation==='reportProjectMismatch'){if(typeof b.reason!=='string'||b.reason.trim().length<5||b.reason.length>1000)throw Error('Reason required');c.reason=b.reason.trim();}
