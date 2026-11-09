@@ -84,7 +84,7 @@ function coordinatorHarness({failMetadata=false,brainOpening='Retrofit',signupOp
  folder('state').createFile('request-a.json',JSON.stringify(create()));
  let locked=false;
  const context=vm.createContext({URL,Date:class extends Date{static now(){return now;}},Intl,PropertiesService:{getScriptProperties:()=>({getProperty:k=>props.get(k),setProperty:(k,v)=>props.set(k,v),getProperties:()=>Object.fromEntries(props),deleteProperty:k=>props.delete(k)})},LockService:{getScriptLock:()=>({tryLock(){if(locked)return false;locked=true;return true;},releaseLock(){locked=false;}})},DriveApp:{getFolderById:folder},Utilities:{Charset:{UTF_8:'utf8'},DigestAlgorithm:{SHA_256:'sha256'},computeHmacSha256Signature:(v,s)=>[...Buffer.from(mac(s,v),'hex')],computeDigest:(alg,v)=>[...Buffer.from(hash(v),'hex')],base64Decode:s=>[...Buffer.from(s,'base64')],newBlob:(bytes,mime,name)=>({bytes,mime,name})},ContentService:{MimeType:{JSON:'application/json'},createTextOutput:v=>({setMimeType:()=>v})},UrlFetchApp:{fetch:(url,options)=>{const body=JSON.parse(options.payload);let data;if(body.query.includes('create_item')){creates++;lastColumns=JSON.parse(body.variables.v);data={create_item:{id:'monday-1'}};}else if(body.query.includes('create_update')){if(failMetadata)throw Error('uncertain metadata failure');data={create_update:{id:'update-1'}};}else if(body.variables.ids[0]==='monday-1')data={items:[{id:'monday-1',board:{id:'18438991769'},column_values:Object.entries(lastColumns).map(([id,v])=>({id,text:typeof v==='object'?(v.text||v.date||''):String(v)}))}]};else if(body.variables.ids[0]==='42')data={items:[{id:'42',board:{id:'18432365825'},column_values:[{id:'color_mm7f7r9d',text:brainOpening},{id:'dropdown_mm7ftf76',text:kiosk},{id:'board_relation_mm7s293s',linked_item_ids:['43']}]}]};else if(body.variables.ids[0]==='43')data={items:[{id:'43',board:{id:'5678025992'},column_values:[{id:'dup__of_store_type5__1',text:signupOpening},{id:'label7',text:signupProject}]}]};else data={items:[{id:binding.itemId,name:binding.store,board:{id:binding.boardId},column_values:[{id:'date',value:JSON.stringify({date:binding.installDate})},{id:'status',text:'Scheduled'}]}]};return {getResponseCode:()=>200,getContentText:()=>JSON.stringify({data})};}}});
- vm.runInContext(fs.readFileSync('integrations/ReadinessCore.gs','utf8')+'\n'+fs.readFileSync('integrations/ReadinessCoordinator.gs','utf8')+'\n'+fs.readFileSync('integrations/ReadinessStandDownWorker.gs','utf8'),context);
+ vm.runInContext(fs.readFileSync('integrations/ReadinessCore.gs','utf8')+'\n'+fs.readFileSync('integrations/ReadinessCoordinator.gs','utf8')+'\n'+fs.readFileSync('integrations/ReadinessStandDownWorker.gs','utf8')+'\n'+fs.readFileSync('integrations/ReadinessGmailSender.gs','utf8')+'\n'+fs.readFileSync('integrations/ReadinessRecipient.gs','utf8'),context);
  let n=0;
  return {context,get creates(){return creates;},read:()=>JSON.parse(folders.get('state')[0].contents),call(c,fixedNonce){const nonce=fixedNonce||(++n).toString(16).padStart(64,'0'),timestamp=now,payload=JSON.stringify(c),w={nonce,timestamp,payload,mac:mac('s'.repeat(40),timestamp+'\n'+nonce+'\n'+payload)};return JSON.parse(JSON.parse(context.doPost({postData:{contents:JSON.stringify(w)}})).payload);}};
 }
@@ -152,7 +152,7 @@ test('Apps Script final warning rechecks recipients before reserving or sending'
   assert.equal(JSON.parse(file.contents).pendingMail.stage,'finalWarning');
   return {sentMessageId:'warning-id',receiptVerified:true};
  };
- const dispatch=()=>context.RD_dispatchWithExistingSender('request-a','https://example.test/',send);
+ const dispatch=()=>context.RD_dispatchWithExistingSender_('request-a','https://example.test/',send);
  assert.throws(dispatch,/HFP source mismatch/);
  assert.equal(sends,0);
  assert.equal(JSON.parse(file.contents).pendingMail,null);
@@ -177,7 +177,7 @@ test('stand-down sends internal Monday notifications once with franchisee sendin
   calls.push(variables);
   return {create_notification:{text:variables.message}};
  };
- const dispatch=()=>context.RD_dispatchWithExistingSender('request-a',null,()=>assert.fail('Unexpected email'),standDownEntry);
+ const dispatch=()=>context.RD_dispatchWithExistingSender_('request-a',null,()=>assert.fail('Unexpected email'),standDownEntry);
  assert.equal(dispatch().notificationsAccepted,2);
  assert.equal(dispatch().notificationsAccepted,2);
  assert.deepEqual(calls.map(c=>c.user),['1','2']);
@@ -197,7 +197,7 @@ test('uncertain Monday notification is held while the other lead can still be no
   if(variables.user==='1')throw Error('Notification transport interrupted');
   return {create_notification:{text:variables.message}};
  };
- const dispatch=()=>context.RD_dispatchWithExistingSender('request-a',null,null,standDownEntry);
+ const dispatch=()=>context.RD_dispatchWithExistingSender_('request-a',null,null,standDownEntry);
  assert.throws(dispatch,/transport interrupted/);
  assert.equal(dispatch().notificationsAccepted,1);
  assert.equal(dispatch().notificationOutcomeUncertain,true);
@@ -213,6 +213,8 @@ test('scheduled stand-down worker previews and enforces the cohort, cut-off and 
  properties.setProperty('RD_STAND_DOWN_USER_IDS','1,2');
  const cohort=entry=>properties.setProperty('RD_STAND_DOWN_COHORT',JSON.stringify([entry]));
  context.Utilities.formatDate=()=> '2026-11-04';
+ context.RD_requireOwner_=()=>{};
+ context.RD_isOwnedTrigger_=()=>true;
  context.console={log(){}};
  const original=context.RD_monday_;
  let calls=0;
@@ -229,7 +231,7 @@ test('scheduled stand-down worker previews and enforces the cohort, cut-off and 
  assert.equal(context.RD_runStandDownWorker().records[0].state,'waiting');
  cohort(standDownEntry);
  assert.equal(context.RD_previewStandDownWorker().records[0].state,'would-notify');
- assert.equal(context.RD_dispatchWithExistingSender(binding.id,null,null).state,'standDown');
+ assert.equal(context.RD_dispatchWithExistingSender_(binding.id,null,null).state,'standDown');
  assert.equal(calls,0);
  assert.equal(context.RD_runStandDownWorker().records[0].notificationsAccepted,2);
  assert.equal(context.RD_runStandDownWorker().records[0].notificationsAccepted,2);
@@ -238,6 +240,7 @@ test('scheduled stand-down worker previews and enforces the cohort, cut-off and 
 test('stand-down trigger installs once with notifications disabled',()=>{
  const {context}=coordinatorHarness();
  const handlers=[];
+ context.RD_requireOwner_=()=>{};
  context.ScriptApp={
   getProjectTriggers:()=>handlers.map(handler=>({getHandlerFunction:()=>handler})),
   newTrigger:handler=>({timeBased:()=>({everyMinutes:minutes=>({create:()=>{
@@ -250,6 +253,37 @@ test('stand-down trigger installs once with notifications disabled',()=>{
  context.PropertiesService.getScriptProperties().setProperty('RD_STAND_DOWN_ALERTS_APPROVED','YES');
  assert.throws(()=>context.RD_installStandDownWorkerTrigger(),/Disable stand-down alerts/);
  assert.deepEqual(handlers,['RD_runStandDownWorker']);
+});
+test('Gmail receipt must identify the exact Sent message and recipients',()=>{
+ const {context}=coordinatorHarness();
+ const owner='subway.emea@vitamojo.com',copy={to:'fze@example.test',cc:'mfp@example.test, hfp@example.test',subject:'Readiness'};
+ const proof={id:'exact',labelIds:['SENT'],payload:{headers:[
+  {name:'From',value:owner},{name:'To',value:'FZE <fze@example.test>'},
+  {name:'Cc',value:'hfp@example.test, mfp@example.test'},{name:'Subject',value:'Readiness'},
+ ]}};
+ const check=message=>context.RD_matchesGmailReceipt_(message,'exact',copy,owner);
+ assert.equal(check(proof),true);
+ assert.equal(check({...proof,id:'other'}),false);
+ assert.equal(check({...proof,labelIds:['DRAFT']}),false);
+ proof.payload.headers[2].value='mfp@example.test';
+ assert.equal(check(proof),false);
+});
+test('anonymous calls cannot invoke the installed readiness worker',()=>{
+ const {context}=coordinatorHarness();
+ context.ScriptApp={getProjectTriggers:()=>[{getHandlerFunction:()=> 'RD_runStandDownWorker',getUniqueId:()=> '1234567890'}]};
+ assert.equal(context.RD_runStandDownWorker().state,'disabled');
+ assert.equal(context.RD_runStandDownWorker({triggerUid:'0123456789'}).state,'disabled');
+ assert.equal(context.RD_isOwnedTrigger_({triggerUid:'1234567890'},'RD_runStandDownWorker'),true);
+ context.Session={getActiveUser:()=>({getEmail:()=>''})};
+ assert.throws(()=>context.RD_previewStandDownWorker(),/mailbox owner required/);
+});
+test('recipient bridge rejects disabled routes and invalid link signatures',()=>{
+ const {context}=coordinatorHarness();
+ const props=context.PropertiesService.getScriptProperties();
+ assert.throws(()=>context.RD_recipientRequest('invalid',{operation:'open'}),/Link or update unavailable/);
+ props.setProperty('RD_PORTAL_ENABLED','YES');
+ props.setProperty('RD_LINK_SECRET','l'.repeat(40));
+ assert.throws(()=>context.RD_recipientRequest('fake.signature',{operation:'open'}),/Link or update unavailable/);
 });
 test('coordinator end-to-end archives and files once, retains comments, rejects RPC replay',()=>{
  const h=coordinatorHarness(),c=command('submit',{id:'request-a',submissionId:'submission-123456',answers,files:[],digest:'digest'});

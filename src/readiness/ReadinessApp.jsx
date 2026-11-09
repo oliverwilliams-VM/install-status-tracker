@@ -15,10 +15,10 @@ function Badge({ children, warn = false }) { return <span className={`rd-badge $
 function Brand() { return <div className="rd-brand"><img src="/Subway.png" alt="Subway" /><span /><img src="/Vita Mojo_Primary_Dark.png" alt="Vita Mojo" /></div>; }
 function download(value) { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' })); a.download = 'readiness-review.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000); }
 function fileData(file) { return new Promise((resolve, reject) => { if (!['image/jpeg', 'image/png'].includes(file.type) || file.size > 700 * 1024) return reject(Error('JPEG/PNG only, maximum 700 KB per photo.')); const reader = new FileReader(); reader.onload = () => resolve({ name: file.name, mime: file.type, data: reader.result.split(',')[1] }); reader.onerror = reject; reader.readAsDataURL(file); }); }
-export default function ReadinessApp() {
+export default function ReadinessApp({ recipientToken, recipientCall } = {}) {
   const url = new URL(window.location.href);
-  const liveToken = new URLSearchParams(url.hash.slice(1)).get('access');
-  const review = url.searchParams.get('view') === 'readiness-review';
+  const liveToken = recipientCall ? recipientToken : new URLSearchParams(url.hash.slice(1)).get('access');
+  const review = !recipientCall && url.searchParams.get('view') === 'readiness-review';
   const [state, setState] = useState(() => readReview() || { version: 1, rows: fixtures(londonToday()), snapshot: null });
   const [tab, setTab] = useState(review ? 'overview' : 'portal');
   const [selected, setSelected] = useState(state.rows[0].binding.id);
@@ -37,6 +37,7 @@ export default function ReadinessApp() {
   }, []);
   useEffect(() => { if (!review) return; try { localStorage.setItem(STORAGE, JSON.stringify(state)); } catch { setError('Review storage is full. Download your review or reset the fictional data.'); } }, [state, review]);
   async function call(operation, payload) {
+    if (recipientCall) return recipientCall(liveToken, { operation, ...payload });
     const r = await fetch('/api/readiness', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${liveToken}` }, body: JSON.stringify({ operation, ...payload }) });
     const data = await r.json(); if (!r.ok) throw Error(data.error || 'Request failed'); return data.result;
   }

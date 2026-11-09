@@ -51,7 +51,14 @@ Existing readiness destination boards: UK/IE 18379251681; DE 18391075175; NL 183
 
 Complete RD_SOURCE_MAP from actual source. Connect Brian's verified hardware shipping field. Connect PED returned/ordered from the existing PED process, separately from FZE confirmation of terminals received. Choose and verify Monday Updates or a dedicated VM notes column, with appropriate internal access; review-browser filtering is not production authentication.
 
-Deploy the supplied readiness coordinator in its own Apps Script project without replacing FreedomPay/PED doPost. Configure private Drive state/evidence archive and secrets through secure runtime configuration. See READINESS_REVIEW.md for exact property names and flags. Production backend/writes/sends remain off until acceptance. Reuse RD_dispatchWithExistingSender through the existing verified sender; do not install another sending trigger or ChatGPT automation.
+Deploy the supplied readiness coordinator in its own Apps Script project without replacing FreedomPay/PED doPost. Configure private Drive state/evidence archive and secrets through secure runtime configuration. See READINESS_REVIEW.md for exact property names and flags. Production backend/writes/sends remain off until acceptance. Reuse RD_dispatchWithExistingSender_ through the existing verified sender; do not install another sending trigger or ChatGPT automation.
+
+## Recipient portal and invitation transport
+
+- Build `dist/ReadinessPortal.html` with `node scripts/build-readiness-portal.js`. Install it as `ReadinessPortal.html` in the standalone coordinator, with `ReadinessRecipient.gs` and `ReadinessGmailSender.gs`. Keep the protected tracker separate. The Apps Script recipient page receives the credential in the URL fragment and validates it before calling the existing signed coordinator.
+- Add the Gmail advanced service for exact Gmail Sent metadata. Authorize it as `subway.emea` and rehearse one internal invitation before enabling production sending. A successful send alone is insufficient: the adapter requires the exact returned message ID, the SENT label, sender, subject and recipient headers.
+- Set `RD_PORTAL_URL` to the approved coordinator web-app URL. Keep `RD_PORTAL_ENABLED`, `RD_SEND_APPROVED`, `RD_WRITES_APPROVED` and stand-down approval off through staging. The existing scheduled worker uses the reviewed cohort and can send only when the portal, signed backend, submission writes and sending are all enabled. Reconcile uncertain mail before retry.
+- Verify a fictional signed link in a signed-out browser, file a test response with an attachment, and reconcile the mail receipt before enabling live invitations.
 
 ## Stand-down pilot deployment
 

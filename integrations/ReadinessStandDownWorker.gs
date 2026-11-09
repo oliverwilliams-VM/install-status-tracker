@@ -1,13 +1,18 @@
 // Runs in the standalone readiness coordinator. This worker has no mail sender.
 function RD_previewStandDownWorker() {
+  RD_requireOwner_();
   return RD_standDownWorker_(true);
 }
 
-function RD_runStandDownWorker() {
-  return RD_standDownWorker_(false);
+function RD_runStandDownWorker(event) {
+  if (!RD_isOwnedTrigger_(event,'RD_runStandDownWorker')) return {state:'disabled',records:[]};
+  const mail = RD_runReadinessMailWorker_();
+  const alerts = RD_standDownWorker_(false);
+  return Object.assign({},alerts,{mail});
 }
 
 function RD_installStandDownWorkerTrigger() {
+  RD_requireOwner_();
   const properties = PropertiesService.getScriptProperties();
   if (properties.getProperty('RD_STAND_DOWN_ALERTS_APPROVED') === 'YES') {
     throw Error('Disable stand-down alerts before installing the trigger');
@@ -54,7 +59,7 @@ function RD_standDownWorker_(preview) {
         records.push({ id: entry.id, state: record.pendingSubmission ? 'held' : 'would-notify' });
         continue;
       }
-      const result = RD_dispatchWithExistingSender(entry.id, null, null, entry);
+      const result = RD_dispatchWithExistingSender_(entry.id, null, null, entry);
       records.push({
         id: entry.id,
         state: result.state,
@@ -93,4 +98,15 @@ function RD_assertStandDownBinding_(record, entry) {
       record.revision !== entry.revision || record.binding.installDate !== entry.installDate) {
     throw Error('Readiness booking changed; review the cohort entry');
   }
+}
+
+function RD_requireOwner_() {
+  if (Session.getActiveUser().getEmail().toLowerCase() !== 'subway.emea@vitamojo.com') {
+    throw Error('Readiness mailbox owner required');
+  }
+}
+
+function RD_isOwnedTrigger_(event,handler) {
+  return Boolean(event&&typeof event.triggerUid==='string'&&/^\d{8,30}$/.test(event.triggerUid)&&
+    ScriptApp.getProjectTriggers().some(trigger=>trigger.getHandlerFunction()===handler&&trigger.getUniqueId()===event.triggerUid));
 }
