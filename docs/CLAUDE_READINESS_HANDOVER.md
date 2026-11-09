@@ -53,6 +53,13 @@ Complete RD_SOURCE_MAP from actual source. Connect Brian's verified hardware shi
 
 Deploy the supplied readiness coordinator in its own Apps Script project without replacing FreedomPay/PED doPost. Configure private Drive state/evidence archive and secrets through secure runtime configuration. See READINESS_REVIEW.md for exact property names and flags. Production backend/writes/sends remain off until acceptance. Reuse RD_dispatchWithExistingSender through the existing verified sender; do not install another sending trigger or ChatGPT automation.
 
+## Stand-down pilot deployment
+
+- Add `ReadinessStandDownWorker.gs` to the standalone coordinator alongside the reviewed core and coordinator. The worker can send only internal Monday notifications. The franchisee sender and intake have a separate cutover.
+- Supply the private state folder and the approved Monday credential. Keep alert approval off. Bind `RD_STAND_DOWN_COHORT` to 1–25 reconciled, already-issued requests. Each entry needs the exact request `id`, Monday installation `itemId`, current integer `revision`, `installDate` (YYYY-MM-DD) and a reviewed `notBefore` timestamp in UTC (YYYY-MM-DDTHH:mm:ssZ). Review the initial cohort and legacy form responses before enabling. A booking change requires a new cohort review.
+- Run `RD_previewStandDownWorker` with sending off. Review missing/stale records and the exact two internal Monday recipient IDs. Run `RD_installStandDownWorkerTrigger` from the approved account. The trigger runs every 15 minutes and exits while alerts are disabled.
+- Rehearse with a clearly labelled test item, confirm both leads received the test, and record the live go/no-go before setting `RD_STAND_DOWN_ALERTS_APPROVED=YES`. Switch the flag off to pause and retain the alert ledger for reconciliation.
+
 ## Required acceptance and cutover evidence
 
 1. Identify deployed sender/trigger inventory, exact source fields, recipient resolution and existing open requests. Document the precise integration diff.

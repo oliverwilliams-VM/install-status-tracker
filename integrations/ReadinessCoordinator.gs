@@ -98,7 +98,7 @@ function RD_submit_(previous,c,save,p){
  * sender must return {sentMessageId,receiptVerified:true} only after Gmail Sent reconciliation.
  * Reservations survive errors; operator reconciliation is required before retry.
  */
-function RD_dispatchWithExistingSender(recordId,portalUrl,sender){
+function RD_dispatchWithExistingSender(recordId,portalUrl,sender,standDownEntry){
  var p=PropertiesService.getScriptProperties();
  var sending=p.getProperty('RD_SEND_APPROVED')==='YES'&&typeof sender==='function';
  var standDownAlerts=p.getProperty('RD_STAND_DOWN_ALERTS_APPROVED')==='YES';
@@ -107,7 +107,11 @@ function RD_dispatchWithExistingSender(recordId,portalUrl,sender){
  try{
   var folder=DriveApp.getFolderById(p.getProperty('RD_STATE_FOLDER_ID')),file=RD_find_(folder,recordId+'.json');if(!file)throw Error('Request missing');
   var r=JSON.parse(file.getBlob().getDataAsString());RD_assertCurrent_(r,p);var today=Utilities.formatDate(new Date(),'Europe/London','yyyy-MM-dd'),plan=planReminder(r,today);
-  if(plan.state==='standDown'&&standDownAlerts)return RD_alertStandDown_(r,file,plan,p);
+  if(standDownEntry){
+   RD_assertStandDownBinding_(r,standDownEntry);
+   if(Date.now()<Date.parse(standDownEntry.notBefore))return {state:'waiting'};
+  }
+  if(plan.state==='standDown'&&standDownAlerts&&standDownEntry)return RD_alertStandDown_(r,file,plan,p);
   if(plan.state!=='due')return plan;
   if(!sending)return {state:'blocked',reason:'Readiness emails disabled'};
   if(plan.stage==='finalWarning')RD_verifySource_({operation:'issue',binding:r.binding,brainItemId:r.sourceReference&&r.sourceReference.brainItemId,fzeEmail:r.fzeEmail,mfpEmail:r.mfpEmail,hfpEmail:r.hfpEmail},p);
