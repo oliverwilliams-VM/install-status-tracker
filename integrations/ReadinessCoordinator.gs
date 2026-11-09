@@ -45,17 +45,21 @@ function RD_monday_(query,variables,p){
 }
 function RD_verifySource_(c,p,previous){
  // This mapping must be reviewed against CURRENT Brain columns, never guessed.
- var m=JSON.parse(p.getProperty('RD_SOURCE_MAP')||'null');if(!m||!m.brainBoardId||!m.installLinkColumn||!m.countryColumn||!m.fzeEmailColumn||!m.mfpEmailColumn||!m.installDateColumn)throw Error('Verified Brain source mapping required');
+ var m=JSON.parse(p.getProperty('RD_SOURCE_MAP')||'null');if(!m||!m.brainBoardId||!m.countryColumn||!m.fzeEmailColumn||!m.mfpEmailColumn||!m.installDateColumn)throw Error('Verified Brain source mapping required');
  if(!/^\d+$/.test(String(c.brainItemId||'')))throw Error('Bound Brain item required');
  var data=RD_monday_('query($ids:[ID!]!){items(ids:$ids){id name board{id} column_values{id text value ... on BoardRelationValue{linked_item_ids}}}}',{ids:[String(c.brainItemId)]},p),item=data.items[0];
  if(!item||String(item.board.id)!==String(m.brainBoardId))throw Error('Brain identity mismatch');
  var values={};item.column_values.forEach(function(v){values[v.id]=v;});
  var binding=c.binding;if(c.operation==='reschedule')binding=Object.assign({},previous.binding,{installDate:c.installDate});
- var links=values[m.installLinkColumn];if(!links||!links.linked_item_ids||links.linked_item_ids.length!==1||String(links.linked_item_ids[0])!==String(binding.itemId))throw Error('Exact installation relationship required');
+ if(m.installLinkColumn){
+  var links=values[m.installLinkColumn];
+  if(!links||!links.linked_item_ids||links.linked_item_ids.length!==1||String(links.linked_item_ids[0])!==String(binding.itemId))throw Error('Exact installation relationship required');
+ }
  var country=market((values[m.countryColumn]||{}).text);if(country!==market(binding.country))throw Error('Market mismatch');
  if(c.operation==='issue'&&((values[m.fzeEmailColumn]||{}).text!==c.fzeEmail||(values[m.mfpEmailColumn]||{}).text!==c.mfpEmail||String(item.name).trim()!==binding.store))throw Error('Recipient/store source mismatch');
  var value=JSON.parse((values[m.installDateColumn]||{}).value||'null');if(!value||value.date!==binding.installDate)throw Error('Install date changed');
  var evidence=RD_projectEvidence_(item,p,c.operation==='issue');
+ if(!m.installLinkColumn)RD_assertInstallSignup_(binding,evidence.signupItemId,p);
  if(c.operation==='issue'){
   var verifiedHfp=RD_hfpEmail_(evidence.hfpPersonId,p);
   if(c.hfpEmail&&c.hfpEmail!==verifiedHfp)throw Error('HFP source mismatch');
@@ -155,9 +159,12 @@ function RD_assertCurrent_(record,p){
  var cols={};i.column_values.forEach(function(v){cols[v.id]=v;});
  var dateCol={UK:'date',IE:'date1__1',NL:'date',DE:'date3'}[market(b.country)],phaseCol=market(b.country)==='IE'?'status__1':'status';
  var date=JSON.parse((cols[dateCol]||{}).value||'null'),phase=(cols[phaseCol]||{}).text||'';
- RD_assertProjectCurrent_(record,p);
+ var evidence=RD_assertProjectCurrent_(record,p);
  if(!date||date.date!==b.installDate||/cancel|postpon|on.?hold|abort|partial|revisit|complete|hypercare|installed|live/i.test(phase))throw Error('Installation changed or no longer pending; reconcile invitation');
+ var mapping=JSON.parse(p.getProperty('RD_SOURCE_MAP')||'null');
+ if(mapping&&!mapping.installLinkColumn)RD_assertInstallSignup_(b,evidence.signupItemId,p);
 }
+
 
 // Verified schema on 28 October 2026. Exact Brain→Sign Up identity, no name matching.
 function RD_projectEvidence_(brain,p,includeHfp){
@@ -187,7 +194,22 @@ function RD_assertProjectCurrent_(record,p){
  var proof=RD_projectEvidence_(item,p);
  if(proof.projectType!==record.binding.projectType||proof.installType!==record.binding.installType)throw Error('Project or equipment context changed; replace invitation');
  if((record.sourceReference.projectEvidence||{}).signupItemId&&record.sourceReference.projectEvidence.signupItemId!==proof.signupItemId)throw Error('Linked Sign Up store changed');
+ return proof;
 }
+
+function RD_assertInstallSignup_(binding,signupItemId,p){
+ validateBinding(binding);
+ var relation={UK:'board_relation1__1',DE:'board_relation1__1',NL:'board_relation6__1',IE:'board_relation_mkmq1n7'}[market(binding.country)];
+ var data=RD_monday_('query($ids:[ID!]!,$cols:[String!]){items(ids:$ids){id name board{id} column_values(ids:$cols){... on BoardRelationValue{linked_items{id board{id}}}}}}',{ids:[binding.itemId],cols:[relation]},p);
+ var item=data.items[0],values=item&&item.column_values||[];
+ var links=values.length===1&&values[0].linked_items||[];
+ var signup=links.filter(function(link){return link.board&&String(link.board.id)==='5678025992';});
+ if(!item||String(item.id)!==binding.itemId||String(item.board.id)!==binding.boardId||
+    String(item.name).trim()!==binding.store||signup.length!==1||String(signup[0].id)!==signupItemId){
+  throw Error('Exact shared Sign Up relationship required');
+ }
+}
+
 
 
 var RD_RESPONSE_COLUMNS_={"Name": "name", "Table Order Date": "date_mm8xa33p", "Form Version": "text_mm8x87v5", "Install Date": "date_mm8x392s", "Table Order Reference": "text_mm8xdy45", "BAU Board ID": "text_mm8xc23m", "Table Arrived": "text_mm8x8yq0", "PEDs Received": "text_mm8xt0r4", "Contact Email": "email_mm8xkb3f", "FZE Comments Original": "long_text_mm8xy9a6", "Power Completed": "text_mm8xptrh", "Market": "text_mm8xbd76", "Hardware Received": "text_mm8xgjx5", "Context Revision": "numeric_mm8xh9d2", "Project Type": "text_mm8xy2mw", "Network Ready": "text_mm8xt2fj", "Data Completed": "text_mm8xk980", "FZE Comments English": "long_text_mm8xc3a", "VM Review": "text_mm8xz749", "Table ETA": "date_mm8xxeqr", "Brain Item ID": "text_mm8x3ngr", "Store Number": "text_mm8x7mvx", "Hardware Complete": "text_mm8x8d80", "Submission ID": "text_mm8xd75c", "Answers JSON": "long_text_mm8xxgct", "BAU Item ID": "text_mm8xter7", "Kiosk Format": "text_mm8x1en9", "Table Ordered": "text_mm8xmw4g", "Translation State": "text_mm8x72qx", "Submitted At UTC": "text_mm8xm7v9", "Response Language": "text_mm8xpnqg", "Hardware Undamaged": "text_mm8xer9j", "Evidence": "file_mm8xfw3h", "Response Digest": "text_mm8xba0p", "Contact Name": "text_mm8x4hms", "Access Confirmed": "text_mm8xyw2y"};

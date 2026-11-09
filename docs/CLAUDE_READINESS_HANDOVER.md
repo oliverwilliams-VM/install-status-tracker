@@ -45,7 +45,7 @@ Record delivery only after independently verified Gmail Sent receipt. Draft crea
 
 ## Sources and integration work still required
 
-Brain board 18432365825; Sign Up board 5678025992. Verify exact Brain-to-install relationship, booked date, country and FZE/MFP fields in the deployed system; never infer the install relationship from the Sign Up relationship board_relation_mm7s293s.
+Brain board 18432365825; Sign Up board 5678025992. Verify exact Brain-to-install relationship, booked date, country and FZE/MFP fields in the deployed system; When Brain has no direct BAU link, verify that Brain and the exact country BAU item both point to the same single Sign Up item. Verify store, market and booked date separately.
 
 Existing readiness destination boards: UK/IE 18379251681; DE 18391075175; NL 18396748434. Retain historical responses and comments. Replace the three entry forms only at reconciled cutover; do not delete boards. Country schemas differ. Canonical archive metadata binds exact installation/request/revision; store number alone is insufficient.
 

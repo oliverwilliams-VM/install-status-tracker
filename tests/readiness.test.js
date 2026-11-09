@@ -72,6 +72,22 @@ function coordinatorHarness({failMetadata=false,brainOpening='Retrofit',signupOp
  let n=0;
  return {context,get creates(){return creates;},read:()=>JSON.parse(folders.get('state')[0].contents),call(c,fixedNonce){const nonce=fixedNonce||(++n).toString(16).padStart(64,'0'),timestamp=now,payload=JSON.stringify(c),w={nonce,timestamp,payload,mac:mac('s'.repeat(40),timestamp+'\n'+nonce+'\n'+payload)};return JSON.parse(JSON.parse(context.doPost({postData:{contents:JSON.stringify(w)}})).payload);}};
 }
+test('Brain and BAU identity require the exact shared Sign Up item',()=>{
+ const {context}=coordinatorHarness();
+ const link={id:'43',board:{id:'5678025992'}};
+ const row={id:binding.itemId,name:binding.store,board:{id:binding.boardId},column_values:[{linked_items:[link]}]};
+ context.RD_monday_=(query,variables)=>{
+  assert.equal(variables.ids[0],binding.itemId);
+  assert.equal(variables.cols[0],'board_relation1__1');
+  return {items:[row]};
+ };
+ const verify=()=>context.RD_assertInstallSignup_(binding,'43',null);
+ assert.doesNotThrow(verify);
+ row.column_values[0].linked_items.push({id:'44',board:{id:'5678025992'}});
+ assert.throws(verify,/Exact shared Sign Up/);
+ row.column_values[0].linked_items=[{id:'44',board:{id:'5678025992'}}];
+ assert.throws(verify,/Exact shared Sign Up/);
+});
 test('linked Sign Up HFP resolves only one active, assigned Monday user',()=>{
  const {context}=coordinatorHarness();
  const item={board:{id:'18432365825'},column_values:[
