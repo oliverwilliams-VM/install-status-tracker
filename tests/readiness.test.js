@@ -129,6 +129,49 @@ test('Apps Script final warning rechecks recipients before reserving or sending'
  assert.equal(dispatch().state,'standDown');
  assert.equal(sends,1);
 });
+test('stand-down sends internal Monday notifications once with franchisee sending off',()=>{
+ const {context}=coordinatorHarness();
+ const properties=context.PropertiesService.getScriptProperties();
+ properties.setProperty('RD_STAND_DOWN_ALERTS_APPROVED','YES');
+ properties.setProperty('RD_STAND_DOWN_USER_IDS','1,2');
+ context.Utilities.formatDate=()=> '2026-11-04';
+ const original=context.RD_monday_;
+ const calls=[];
+ context.RD_monday_=(query,variables,p)=>{
+  if(!query.includes('create_notification'))return original(query,variables,p);
+  calls.push(variables);
+  return {create_notification:{text:variables.message}};
+ };
+ const dispatch=()=>context.RD_dispatchWithExistingSender('request-a',null,()=>assert.fail('Unexpected email'));
+ assert.equal(dispatch().notificationsAccepted,2);
+ assert.equal(dispatch().notificationsAccepted,2);
+ assert.deepEqual(calls.map(c=>c.user),['1','2']);
+ assert.ok(calls.every(c=>c.item===binding.itemId&&c.message.includes('tell Apex to stand down')));
+});
+test('uncertain Monday notification is held while the other lead can still be notified',()=>{
+ const {context}=coordinatorHarness();
+ const properties=context.PropertiesService.getScriptProperties();
+ properties.setProperty('RD_STAND_DOWN_ALERTS_APPROVED','YES');
+ properties.setProperty('RD_STAND_DOWN_USER_IDS','1,2');
+ context.Utilities.formatDate=()=> '2026-11-04';
+ const original=context.RD_monday_;
+ const calls=[];
+ context.RD_monday_=(query,variables,p)=>{
+  if(!query.includes('create_notification'))return original(query,variables,p);
+  calls.push(variables.user);
+  if(variables.user==='1')throw Error('Notification transport interrupted');
+  return {create_notification:{text:variables.message}};
+ };
+ const dispatch=()=>context.RD_dispatchWithExistingSender('request-a',null,null);
+ assert.throws(dispatch,/transport interrupted/);
+ assert.equal(dispatch().notificationsAccepted,1);
+ assert.equal(dispatch().notificationOutcomeUncertain,true);
+ assert.deepEqual(calls,['1','2']);
+ const file=context.DriveApp.getFolderById('state').getFilesByName('request-a.json').next();
+ file.setContent(JSON.stringify({...create(),pendingSubmission:{id:'in-progress'}}));
+ assert.equal(dispatch().state,'blocked');
+ assert.deepEqual(calls,['1','2']);
+});
 test('coordinator end-to-end archives and files once, retains comments, rejects RPC replay',()=>{
  const h=coordinatorHarness(),c=command('submit',{id:'request-a',submissionId:'submission-123456',answers,files:[],digest:'digest'});
  let result=h.call(c);assert.equal(result.ok,true,JSON.stringify(result));assert.equal(h.creates,1);assert.equal(h.read().history[0].answers.comments,'Ready');assert.equal(h.read().submitted,true);

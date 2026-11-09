@@ -99,18 +99,49 @@ function RD_submit_(previous,c,save,p){
  * Reservations survive errors; operator reconciliation is required before retry.
  */
 function RD_dispatchWithExistingSender(recordId,portalUrl,sender){
- var p=PropertiesService.getScriptProperties();if(p.getProperty('RD_SEND_APPROVED')!=='YES'||typeof sender!=='function')throw Error('Sending disabled');
+ var p=PropertiesService.getScriptProperties();
+ var sending=p.getProperty('RD_SEND_APPROVED')==='YES'&&typeof sender==='function';
+ var standDownAlerts=p.getProperty('RD_STAND_DOWN_ALERTS_APPROVED')==='YES';
+ if(!sending&&!standDownAlerts)throw Error('Sending and stand-down alerts disabled');
  var lock=LockService.getScriptLock();if(!lock.tryLock(10000))throw Error('Busy');
  try{
   var folder=DriveApp.getFolderById(p.getProperty('RD_STATE_FOLDER_ID')),file=RD_find_(folder,recordId+'.json');if(!file)throw Error('Request missing');
   var r=JSON.parse(file.getBlob().getDataAsString());RD_assertCurrent_(r,p);var today=Utilities.formatDate(new Date(),'Europe/London','yyyy-MM-dd'),plan=planReminder(r,today);
+  if(plan.state==='standDown'&&standDownAlerts)return RD_alertStandDown_(r,file,plan,p);
   if(plan.state!=='due')return plan;
+  if(!sending)return {state:'blocked',reason:'Readiness emails disabled'};
   if(plan.stage==='finalWarning')RD_verifySource_({operation:'issue',binding:r.binding,brainItemId:r.sourceReference&&r.sourceReference.brainItemId,fzeEmail:r.fzeEmail,mfpEmail:r.mfpEmail,hfpEmail:r.hfpEmail},p);
   var reserved=reduce(r,{operation:'reserveMail',today:today,key:plan.key},Date.now());file.setContent(JSON.stringify(reserved.record));
   var copy=emailPreview(r,plan,portalUrl),receipt=sender(copy,plan.key);
   if(!receipt||!receipt.receiptVerified||!receipt.sentMessageId)throw Error('Outcome uncertain; reconcile Gmail Sent before retry');
   var sent=reduce(reserved.record,{operation:'confirmSent',key:plan.key,today:today,sentMessageId:receipt.sentMessageId,receiptVerified:true},Date.now());file.setContent(JSON.stringify(sent.record));return sent.result;
  }finally{lock.releaseLock();}
+}
+
+// Called under the dispatch lock after verifying the current installation.
+function RD_alertStandDown_(r,file,plan,p){
+ if(r.pendingSubmission)return {state:'blocked',reason:'Readiness submission requires reconciliation'};
+ var ids=(p.getProperty('RD_STAND_DOWN_USER_IDS')||'').split(',').map(function(id){return id.trim();});
+ if(ids.length!==2||ids[0]===ids[1]||ids.some(function(id){return !/^\d+$/.test(id);}))throw Error('Two verified internal stand-down recipients required');
+ if(!r.standDownAlert||r.standDownAlert.revision!==r.revision)r.standDownAlert={revision:r.revision,recipients:{}};
+ var alerts=r.standDownAlert.recipients;
+ var message='Readiness action for store '+r.binding.store+' (install '+r.binding.installDate+'). Recheck the latest franchisee response and warning history. If still outstanding and due for cancellation, cancel the booking and tell Apex to stand down. Record the cancellation and Apex confirmation on the install item.';
+ function save(){
+  var encoded=JSON.stringify(r);
+  file.setContent(encoded);
+  if(file.getBlob().getDataAsString()!==encoded)throw Error('Stand-down alert state write unconfirmed');
+ }
+ ids.forEach(function(id){
+  // An uncertain notification stays reserved for manual reconciliation.
+  if(alerts[id])return;
+  alerts[id]='uncertain';
+  save();
+  var result=RD_monday_('mutation($user:ID!,$item:ID!,$message:String!){create_notification(user_id:$user,target_id:$item,target_type:Project,text:$message){text}}',{user:id,item:r.binding.itemId,message:message},p);
+  if(!result.create_notification||result.create_notification.text!==message)throw Error('Stand-down notification acceptance unconfirmed');
+  alerts[id]='accepted';
+  save();
+ });
+ return Object.assign({},plan,{notificationsAccepted:ids.filter(function(id){return alerts[id]==='accepted';}).length,notificationOutcomeUncertain:ids.some(function(id){return alerts[id]==='uncertain';})});
 }
 
 function RD_assertCurrent_(record,p){
