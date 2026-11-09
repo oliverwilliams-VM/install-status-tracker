@@ -5,9 +5,9 @@ export function reduce(previous, c, now) {
  if (c.operation === 'issue') {
   validateBinding(c.binding);
   if (previous) throw Error('Request exists; reconcile or reschedule');
-  for (const k of ['fzeEmail','mfpEmail']) if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c[k] || '')) throw Error('Verified recipients required');
+  for (const k of ['fzeEmail','mfpEmail',...(c.hfpEmail ? ['hfpEmail'] : [])]) if (!/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(c[k] || '')) throw Error('Verified recipients required');
   if (!c.sourceVerified || !/^[a-f0-9]{64}$/.test(c.tokenHash || '') || !(c.expires > now)) throw Error('Verified source and credentials required');
-  const record = {binding:c.binding,revision:1,tokenHash:c.tokenHash,expires:c.expires,fzeEmail:c.fzeEmail,mfpEmail:c.mfpEmail,sourceReference:c.sourceReference,submitted:false,answers:null,sent:{},history:[],notes:[],pendingMail:null,pendingSubmission:null,submissions:{},createdAt:at};
+  const record = {binding:c.binding,revision:1,tokenHash:c.tokenHash,expires:c.expires,fzeEmail:c.fzeEmail,mfpEmail:c.mfpEmail,hfpEmail:c.hfpEmail,sourceReference:c.sourceReference,submitted:false,answers:null,sent:{},history:[],notes:[],pendingMail:null,pendingSubmission:null,submissions:{},createdAt:at};
   return {record,result:{id:record.binding.id,revision:1}};
  }
  if (!previous) throw Error('Request not found');

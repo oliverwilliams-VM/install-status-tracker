@@ -1,7 +1,7 @@
 // Shared deterministic rules; calendar dates deliberately avoid browser time zones.
 export const MARKETS = { UK: 'en', IE: 'en', NL: 'nl', DE: 'de' };
 export function market(value) {
-  const m = ({ GB: 'UK', IRL: 'IE' })[value] || value;
+  const m = ({ GB: 'UK', IRL: 'IE', 'UNITED KINGDOM': 'UK', IRELAND: 'IE', NETHERLANDS: 'NL', GERMANY: 'DE' })[String(value || '').trim().toUpperCase()] || value;
   if (!Object.prototype.hasOwnProperty.call(MARKETS, m)) throw Error('Unsupported market');
   return m;
 }
@@ -20,7 +20,13 @@ export function londonToday(now = new Date()) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
 }
 export function milestones(installDate) {
-  return [-10, -7, -5].map((offset, i) => ({ stage: ['invite', 'chase1', 'chase2'][i], date: plusDays(installDate, offset), offset, copyMfp: i === 2 }));
+  return [
+    { stage: 'invite', offset: -10 },
+    { stage: 'chase1', offset: -7 },
+    { stage: 'chase2', offset: -5, copyMfp: true },
+    { stage: 'finalWarning', offset: -4, copyMfp: true, copyHfp: true },
+    { stage: 'standDown', offset: -3 },
+  ].map(milestone => ({ ...milestone, date: plusDays(installDate, milestone.offset) }));
 }
 export function validateBinding(b) {
   if (!b || !/^[a-zA-Z0-9_-]{1,80}$/.test(b.id || '') || !/^\d{1,10}$/.test(b.store || '') || !/^\d+$/.test(b.itemId || '') || !/^\d+$/.test(b.boardId || '') || !['sfk', 'other'].includes(b.installType)) throw Error('Invalid installation binding');
@@ -154,19 +160,23 @@ export function planReminder(record, today) {
   dateOnly(today);
   if (record.projectTypeIssue) return {state:'stopped',reason:'Project type discrepancy requires team review'};
   if (record.cancelled || record.completed || ['Live', 'Postponed', 'Partially completed', 'Aborted'].includes(record.outcome) || record.submitted || today >= record.binding.installDate) return { state: 'stopped', reason: record.submitted ? 'Response received; follow up blockers separately' : 'No outstanding future install' };
-  const due = milestones(record.binding.installDate).filter(x => x.date <= today);
-  if (!due.length) return { state: 'waiting', next: milestones(record.binding.installDate)[0].date };
+  const schedule = milestones(record.binding.installDate);
+  const due = schedule.filter(x => x.date <= today);
+  if (!due.length) return { state: 'waiting', next: schedule[0].date };
   const sent = record.sent || {};
   const latest = due[due.length - 1];
+  if (latest.stage === 'standDown') return { state: 'standDown', reason: 'Readiness response outstanding; cancellation and Apex stand-down due', scheduledDate: latest.date };
   if (sent[latest.stage]) return { state: 'waiting', reason: 'Latest due stage already sent' };
   // Late arrivals receive one consolidated message, never a burst of old chasers.
-  const stage = Object.keys(sent).length ? latest.stage : 'invite';
+  const stage = latest.copyMfp || Object.keys(sent).length ? latest.stage : 'invite';
   if (sent[stage]) return { state: 'waiting', reason: 'Await next milestone' };
   if (Object.values(sent).some(x => x.date === today)) return { state: 'waiting', reason: 'One message per installation per day' };
-  const copyMfp = latest.copyMfp;
-  if (!record.fzeEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(record.fzeEmail)) return { state: 'blocked', reason: 'Verified FZE email required' };
-  if (copyMfp && (!record.mfpEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(record.mfpEmail))) return { state: 'blocked', reason: 'Verified store MFP email required for escalation' };
-  return { state: 'due', stage, date: today, scheduledDate: latest.date, copyMfp, to: record.fzeEmail, cc: copyMfp ? record.mfpEmail : '', key: `${record.binding.id}:${record.revision}:${stage}`, late: stage === 'invite' && latest.stage !== 'invite' };
+  const copyMfp = Boolean(latest.copyMfp);
+  if (!record.fzeEmail || !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(record.fzeEmail)) return { state: 'blocked', reason: 'Verified FZE email required' };
+  if (copyMfp && (!record.mfpEmail || !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(record.mfpEmail))) return { state: 'blocked', reason: 'Verified store MFP email required for escalation' };
+  if (latest.copyHfp && !/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(record.hfpEmail || '')) return { state: 'blocked', reason: 'Verified store HFP email required for final warning' };
+  const cc = copyMfp ? [record.mfpEmail, ...(latest.copyHfp ? [record.hfpEmail] : [])].join(', ') : '';
+  return { state: 'due', stage, date: today, scheduledDate: latest.date, copyMfp, to: record.fzeEmail, cc, key: `${record.binding.id}:${record.revision}:${stage}`, late: stage === 'invite' && latest.stage !== 'invite' };
 }
 export function reschedule(record, installDate) {
   dateOnly(installDate);

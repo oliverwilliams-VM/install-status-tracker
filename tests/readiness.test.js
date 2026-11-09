@@ -12,12 +12,41 @@ const now=Date.parse('2026-10-28T10:00:00Z');
 const binding={id:'request-a',store:'999999',country:'UK',boardId:'5678172488',itemId:'12345',installDate:'2026-11-07',installType:'sfk',projectType:'trading'};
 const answers={name:'Demo',team:'yes',area:'yes',powerData:'yes',peds:'yes',floorplan:'yes',table:'yes',tableDelivery:'',comments:'Ready'};
 const credentials={tokenHash:'a'.repeat(64),revision:1};
-const create=()=>reduce(null,{operation:'issue',binding,fzeEmail:'fze@example.test',mfpEmail:'mfp@example.test',sourceVerified:true,...credentials,expires:now+864000000,sourceReference:{brainItemId:'42'}},now).record;
+const create=()=>reduce(null,{operation:'issue',binding,fzeEmail:'fze@example.test',mfpEmail:'mfp@example.test',hfpEmail:'hfp@example.test',sourceVerified:true,...credentials,expires:now+864000000,sourceReference:{brainItemId:'42'}},now).record;
 const command=(operation,more={})=>({operation,...credentials,...more});
-test('calendar schedule crosses months/leap days without DST drift',()=>{assert.deepEqual(milestones('2026-11-07').map(x=>x.date),['2026-10-28','2026-10-31','2026-11-02']);assert.equal(plusDays('2028-03-01',-1),'2028-02-29');assert.equal(londonToday(new Date('2026-07-01T23:30:00Z')),'2026-07-02');assert.throws(()=>plusDays('2026-02-30',1));});
-test('unknown market and cross-country binding blocked',()=>{assert.equal(market('IRL'),'IE');assert.throws(()=>market('FR'));assert.throws(()=>validateBinding({...binding,country:'NL'}));});
-test('initial and two chasers; MFP only on final milestone',()=>{let r=create();assert.equal(planReminder(r,'2026-10-27').state,'waiting');let p=planReminder(r,'2026-10-28');assert.equal(p.stage,'invite');assert.equal(p.cc,'');r.sent.invite={date:'2026-10-28'};p=planReminder(r,'2026-10-31');assert.equal(p.stage,'chase1');assert.equal(p.copyMfp,false);r.sent.chase1={date:'2026-10-31'};p=planReminder(r,'2026-11-02');assert.equal(p.stage,'chase2');assert.equal(p.cc,r.mfpEmail);});
-test('late intake consolidates overdue reminders and no same-day burst',()=>{let r=create();let p=planReminder(r,'2026-11-03');assert.equal(p.stage,'invite');assert.equal(p.late,true);assert.equal(p.copyMfp,true);r.sent.invite={date:'2026-11-03'};assert.equal(planReminder(r,'2026-11-03').state,'waiting');});
+test('calendar schedule crosses months/leap days without DST drift',()=>{assert.deepEqual(milestones('2026-11-07').map(x=>x.date),['2026-10-28','2026-10-31','2026-11-02','2026-11-03','2026-11-04']);assert.equal(plusDays('2028-03-01',-1),'2028-02-29');assert.equal(londonToday(new Date('2026-07-01T23:30:00Z')),'2026-07-02');assert.throws(()=>plusDays('2026-02-30',1));});
+test('unknown market and cross-country binding blocked',()=>{assert.equal(market('IRL'),'IE');assert.equal(market('United Kingdom'),'UK');assert.equal(market('Germany'),'DE');assert.equal(market('Netherlands'),'NL');assert.throws(()=>market('FR'));assert.throws(()=>validateBinding({...binding,country:'NL'}));});
+test('readiness warnings escalate from FZE to MFP and HFP before stand-down',()=>{
+ const r=create();
+ assert.equal(planReminder(r,'2026-10-27').state,'waiting');
+ for(const [date,stage,cc] of [
+  ['2026-10-28','invite',''],
+  ['2026-10-31','chase1',''],
+  ['2026-11-02','chase2',r.mfpEmail],
+  ['2026-11-03','finalWarning',r.mfpEmail+', '+r.hfpEmail],
+ ]){
+  const plan=planReminder(r,date);
+  assert.equal(plan.stage,stage);
+  assert.equal(plan.cc,cc);
+  r.sent[stage]={date};
+ }
+ assert.equal(planReminder(r,'2026-11-04').state,'standDown');
+ assert.equal(planReminder({...r,submitted:true},'2026-11-04').state,'stopped');
+ assert.throws(()=>reduce(r,{operation:'reserveMail',today:'2026-11-04'},now),/not due/);
+});
+test('late intake uses one current warning and blocks a missing or malformed HFP',()=>{
+ const r=create();
+ const day='2026-11-03';
+ const plan=planReminder(r,day);
+ assert.equal(plan.stage,'finalWarning');
+ assert.equal(plan.cc,'mfp@example.test, hfp@example.test');
+ for(const hfpEmail of [undefined,'bad,recipient@example.test']){
+  assert.equal(planReminder({...r,hfpEmail},day).state,'blocked');
+ }
+ r.sent.finalWarning={date:day};
+ assert.equal(planReminder(r,day).state,'waiting');
+ assert.equal(planReminder(create(),'2026-11-05').state,'standDown');
+});
 test('missing escalation recipient blocks; completed/cancelled stop',()=>{let r=create();r.mfpEmail='';assert.equal(planReminder(r,'2026-11-02').state,'blocked');for(const flag of ['completed','cancelled','submitted'])assert.equal(planReminder({...create(),[flag]:true},'2026-11-02').state,'stopped');assert.equal(planReminder(create(),'2026-11-07').state,'stopped');});
 test('SFK-only question and incomplete answers validated',()=>{assert.equal(validateAnswers(answers,'other').table,'na');assert.throws(()=>validateAnswers({...answers,table:''},'sfk'));assert.throws(()=>validateAnswers({...answers,team:''},'sfk'));assert.throws(()=>validateAnswers({...answers,name:' '},'sfk'));assert.deepEqual(blockers({...answers,powerData:'no'},'sfk'),['Power and data']);});
 test('submission reservation and verified receipt stop chasers despite blockers',()=>{let r=create();const c=command('beginSubmission',{submissionId:'submission-123456',digest:'digest',answers:{...answers,peds:'no'}});let v=reduce(r,c,now);assert.equal(v.result.reserved,true);r=v.record;assert.equal(reduce(r,c,now).result.pending,true);assert.throws(()=>reduce(r,{...c,submissionId:'submission-different'},now));assert.throws(()=>reduce(r,command('commitSubmission',{submissionId:c.submissionId,digest:'digest'}),now));v=reduce(r,command('commitSubmission',{submissionId:c.submissionId,digest:'digest',archiveId:'archive',mondayItemId:'77',files:[]}),now);r=v.record;assert.equal(r.submitted,true);assert.deepEqual(v.result.blockers,['PEDs received']);assert.equal(planReminder(r,'2026-10-31').state,'stopped');assert.equal(reduce(r,c,now).result.completed,true);assert.throws(()=>reduce(r,{...c,digest:'different'},now));});
@@ -25,7 +54,7 @@ test('reschedule keeps history, resets milestones and invalidates old links',()=
 test('mail reservation blocks parallel sender/submission; draft is not Sent',()=>{let r=create();const p=planReminder(r,'2026-10-28');r=reduce(r,{operation:'reserveMail',today:'2026-10-28',key:p.key},now).record;assert.throws(()=>reduce(r,{operation:'reserveMail',today:'2026-10-28',key:p.key},now));assert.throws(()=>reduce(r,command('beginSubmission',{submissionId:'submission-123456',digest:'a',answers}),now));assert.throws(()=>reduce(r,{operation:'confirmSent',key:p.key,sentMessageId:'draft',today:'2026-10-28'},now));r=reduce(r,{operation:'confirmSent',key:p.key,sentMessageId:'sent-message',receiptVerified:true,today:'2026-10-28'},now).record;assert.equal(planReminder(r,'2026-10-28').state,'waiting');});
 test('recipient response never exposes VM notes or email addresses',()=>{let r=create();r=reduce(r,{operation:'note',author:'VM',text:'Private operational note',visibility:'internal'},now).record;const opened=reduce(r,command('open'),now).result;assert.equal(opened.notes,undefined);assert.equal(opened.fzeEmail,undefined);assert.equal(opened.mfpEmail,undefined);assert.equal(opened.tokenHash,undefined);});
 test('signed links reject tampering expiry replacement and weak configuration',()=>{const secret='s'.repeat(40),token=issueToken({id:'request-a',revision:1,expires:now+1000},secret);assert.equal(verifyToken(token,secret,now).id,'request-a');assert.equal(verifyToken(token,secret,now).tokenHash,hash(token));assert.throws(()=>verifyToken(token+'x',secret,now));assert.throws(()=>verifyToken(token,secret,now+1000));assert.throws(()=>issueToken({id:'a',revision:1,expires:now},'weak'));});
-test('three languages and four countries have complete matching copy',()=>{const keys=Object.keys(copyFor('UK')).sort();for(const country of ['UK','IE','NL','DE']){assert.deepEqual(Object.keys(copyFor(country)).sort(),keys);const r={...create(),binding:{...binding,country}};for(const stage of ['invite','chase1','chase2']){const mail=emailPreview(r,{stage,copyMfp:stage==='chase2'},'https://example.test/#access=abc');assert.ok(mail.subject.includes(binding.store));assert.equal(mail.cc,stage==='chase2'?r.mfpEmail:'');assert.ok(!mail.html.includes('undefined'));}}assert.throws(()=>emailPreview(create(),{stage:'invite'},'javascript:alert(1)'));});
+test('three languages and four countries have complete matching copy',()=>{const keys=Object.keys(copyFor('UK')).sort();for(const country of ['UK','IE','NL','DE']){assert.deepEqual(Object.keys(copyFor(country)).sort(),keys);const r={...create(),binding:{...binding,country}};for(const stage of ['invite','chase1','chase2','finalWarning']){const mail=emailPreview(r,{stage,copyMfp:stage==='chase2'},'https://example.test/#access=abc');assert.ok(mail.subject.includes(binding.store));assert.equal(mail.cc,stage==='chase2'?r.mfpEmail:'');assert.ok(!mail.html.includes('undefined'));}}assert.throws(()=>emailPreview(create(),{stage:'invite'},'javascript:alert(1)'));});
 test('photo count size and magic bytes validated',()=>{assert.deepEqual(validateFiles([]),[]);assert.throws(()=>validateFiles([{}, {}, {}]));assert.throws(()=>validateFiles([{mime:'image/png',name:'a.png',data:Buffer.from('<script>').toString('base64')}]));const bytes=Buffer.from('89504e470d0a1a0a0000','hex');assert.equal(validateFiles([{mime:'image/png',name:'photo.png',data:bytes.toString('base64')}]).length,1);});
 test('snapshot distinguishes date/progress changes and removals',()=>{const a=[{id:'1',store:'100',outcome:'Booked',installDate:'2026-11-01'},{id:'2',store:'200'}],b=[{...a[0],outcome:'Live',installDate:'2026-11-02'}];assert.equal(snapshotChanges(a,b).length,3);});
 test('coordinator disabled by default; untrusted URL rejected',async()=>{await assert.rejects(rpc({}, {env:{}}));await assert.rejects(rpc({}, {env:{READINESS_BACKEND_ENABLED:'YES',READINESS_RPC_SECRET:'s'.repeat(40),READINESS_COORDINATOR_URL:'https://evil.test/'}}));});
@@ -39,10 +68,173 @@ function coordinatorHarness({failMetadata=false,brainOpening='Retrofit',signupOp
  folder('state').createFile('request-a.json',JSON.stringify(create()));
  let locked=false;
  const context=vm.createContext({URL,Date:class extends Date{static now(){return now;}},Intl,PropertiesService:{getScriptProperties:()=>({getProperty:k=>props.get(k),setProperty:(k,v)=>props.set(k,v),getProperties:()=>Object.fromEntries(props),deleteProperty:k=>props.delete(k)})},LockService:{getScriptLock:()=>({tryLock(){if(locked)return false;locked=true;return true;},releaseLock(){locked=false;}})},DriveApp:{getFolderById:folder},Utilities:{Charset:{UTF_8:'utf8'},DigestAlgorithm:{SHA_256:'sha256'},computeHmacSha256Signature:(v,s)=>[...Buffer.from(mac(s,v),'hex')],computeDigest:(alg,v)=>[...Buffer.from(hash(v),'hex')],base64Decode:s=>[...Buffer.from(s,'base64')],newBlob:(bytes,mime,name)=>({bytes,mime,name})},ContentService:{MimeType:{JSON:'application/json'},createTextOutput:v=>({setMimeType:()=>v})},UrlFetchApp:{fetch:(url,options)=>{const body=JSON.parse(options.payload);let data;if(body.query.includes('create_item')){creates++;lastColumns=JSON.parse(body.variables.v);data={create_item:{id:'monday-1'}};}else if(body.query.includes('create_update')){if(failMetadata)throw Error('uncertain metadata failure');data={create_update:{id:'update-1'}};}else if(body.variables.ids[0]==='monday-1')data={items:[{id:'monday-1',board:{id:'18438991769'},column_values:Object.entries(lastColumns).map(([id,v])=>({id,text:typeof v==='object'?(v.text||v.date||''):String(v)}))}]};else if(body.variables.ids[0]==='42')data={items:[{id:'42',board:{id:'18432365825'},column_values:[{id:'color_mm7f7r9d',text:brainOpening},{id:'dropdown_mm7ftf76',text:kiosk},{id:'board_relation_mm7s293s',linked_item_ids:['43']}]}]};else if(body.variables.ids[0]==='43')data={items:[{id:'43',board:{id:'5678025992'},column_values:[{id:'dup__of_store_type5__1',text:signupOpening},{id:'label7',text:signupProject}]}]};else data={items:[{id:binding.itemId,name:binding.store,board:{id:binding.boardId},column_values:[{id:'date',value:JSON.stringify({date:binding.installDate})},{id:'status',text:'Scheduled'}]}]};return {getResponseCode:()=>200,getContentText:()=>JSON.stringify({data})};}}});
- vm.runInContext(fs.readFileSync('integrations/ReadinessCore.gs','utf8')+'\n'+fs.readFileSync('integrations/ReadinessCoordinator.gs','utf8'),context);
+ vm.runInContext(fs.readFileSync('integrations/ReadinessCore.gs','utf8')+'\n'+fs.readFileSync('integrations/ReadinessCoordinator.gs','utf8')+'\n'+fs.readFileSync('integrations/ReadinessStandDownWorker.gs','utf8'),context);
  let n=0;
  return {context,get creates(){return creates;},read:()=>JSON.parse(folders.get('state')[0].contents),call(c,fixedNonce){const nonce=fixedNonce||(++n).toString(16).padStart(64,'0'),timestamp=now,payload=JSON.stringify(c),w={nonce,timestamp,payload,mac:mac('s'.repeat(40),timestamp+'\n'+nonce+'\n'+payload)};return JSON.parse(JSON.parse(context.doPost({postData:{contents:JSON.stringify(w)}})).payload);}};
 }
+test('Brain and BAU identity require the exact shared Sign Up item',()=>{
+ const {context}=coordinatorHarness();
+ const link={id:'43',board:{id:'5678025992'}};
+ const row={id:binding.itemId,name:binding.store,board:{id:binding.boardId},column_values:[{linked_items:[link]}]};
+ context.RD_monday_=(query,variables)=>{
+  assert.equal(variables.ids[0],binding.itemId);
+  assert.equal(variables.cols[0],'board_relation1__1');
+  return {items:[row]};
+ };
+ const verify=()=>context.RD_assertInstallSignup_(binding,'43',null);
+ assert.doesNotThrow(verify);
+ row.column_values[0].linked_items.push({id:'44',board:{id:'5678025992'}});
+ assert.throws(verify,/Exact shared Sign Up/);
+ row.column_values[0].linked_items=[{id:'44',board:{id:'5678025992'}}];
+ assert.throws(verify,/Exact shared Sign Up/);
+});
+test('linked Sign Up recipients resolve only one active, assigned Monday user per role',()=>{
+ const {context}=coordinatorHarness();
+ const item={board:{id:'18432365825'},column_values:[
+  {id:'board_relation_mm7s293s',linked_item_ids:['43']},
+  {id:'color_mm7f7r9d',text:'Retrofit'},
+  {id:'dropdown_mm7ftf76',text:'Small Format Kiosk'},
+ ]};
+ let hfp=[{id:'7',kind:'person'}];
+ let user={id:'7',email:'hfp@example.test',enabled:true,is_pending:false};
+ context.RD_monday_=(query,variables)=>{
+  if(query.includes('users(')){
+   assert.equal(variables.ids[0],'7');
+   return {users:[user]};
+  }
+  assert.equal(variables.ids[0],'43');
+  return {items:[{id:'43',board:{id:'5678025992'},column_values:[
+   {id:'dup__of_store_type5__1',text:'Retrofit'},
+   {id:'people2__1',persons_and_teams:hfp},
+   {id:'people__1',persons_and_teams:[{id:'8',kind:'person'}]},
+  ]}]};
+ };
+ const resolve=()=>context.RD_assigneeEmail_(context.RD_projectEvidence_(item,null,true).hfpPersonId,null);
+ assert.equal(context.RD_projectEvidence_(item,null,true).mfpPersonId,'8');
+ assert.equal(resolve(),'hfp@example.test');
+ user={...user,enabled:false};
+ assert.equal(resolve(),'');
+ hfp=[{id:'7',kind:'team'}];
+ assert.equal(resolve(),'');
+ hfp=[{id:'7',kind:'person'},{id:'8',kind:'person'}];
+ assert.equal(resolve(),'');
+});
+test('Apps Script final warning rechecks recipients before reserving or sending',()=>{
+ const {context}=coordinatorHarness();
+ const file=context.DriveApp.getFolderById('state').getFilesByName('request-a.json').next();
+ const properties=context.PropertiesService.getScriptProperties();
+ properties.setProperty('RD_SEND_APPROVED','YES');
+ context.Utilities.formatDate=()=> '2026-11-03';
+ let verified=false,sends=0;
+ context.RD_verifySource_=c=>{
+  assert.equal(c.hfpEmail,'hfp@example.test');
+  if(!verified)throw Error('HFP source mismatch');
+ };
+ const send=(mail)=>{
+  sends++;
+  assert.equal(mail.cc,'mfp@example.test, hfp@example.test');
+  assert.equal(JSON.parse(file.contents).pendingMail.stage,'finalWarning');
+  return {sentMessageId:'warning-id',receiptVerified:true};
+ };
+ const dispatch=()=>context.RD_dispatchWithExistingSender('request-a','https://example.test/',send);
+ assert.throws(dispatch,/HFP source mismatch/);
+ assert.equal(sends,0);
+ assert.equal(JSON.parse(file.contents).pendingMail,null);
+ verified=true;
+ assert.equal(dispatch().confirmed,true);
+ assert.equal(dispatch().state,'waiting');
+ context.Utilities.formatDate=()=> '2026-11-04';
+ assert.equal(dispatch().state,'standDown');
+ assert.equal(sends,1);
+});
+const standDownEntry={id:binding.id,itemId:binding.itemId,revision:1,installDate:binding.installDate,notBefore:'2026-10-28T09:00:00Z'};
+test('stand-down sends internal Monday notifications once with franchisee sending off',()=>{
+ const {context}=coordinatorHarness();
+ const properties=context.PropertiesService.getScriptProperties();
+ properties.setProperty('RD_STAND_DOWN_ALERTS_APPROVED','YES');
+ properties.setProperty('RD_STAND_DOWN_USER_IDS','1,2');
+ context.Utilities.formatDate=()=> '2026-11-04';
+ const original=context.RD_monday_;
+ const calls=[];
+ context.RD_monday_=(query,variables,p)=>{
+  if(!query.includes('create_notification'))return original(query,variables,p);
+  calls.push(variables);
+  return {create_notification:{text:variables.message}};
+ };
+ const dispatch=()=>context.RD_dispatchWithExistingSender('request-a',null,()=>assert.fail('Unexpected email'),standDownEntry);
+ assert.equal(dispatch().notificationsAccepted,2);
+ assert.equal(dispatch().notificationsAccepted,2);
+ assert.deepEqual(calls.map(c=>c.user),['1','2']);
+ assert.ok(calls.every(c=>c.item===binding.itemId&&c.message.includes('tell Apex to stand down')));
+});
+test('uncertain Monday notification is held while the other lead can still be notified',()=>{
+ const {context}=coordinatorHarness();
+ const properties=context.PropertiesService.getScriptProperties();
+ properties.setProperty('RD_STAND_DOWN_ALERTS_APPROVED','YES');
+ properties.setProperty('RD_STAND_DOWN_USER_IDS','1,2');
+ context.Utilities.formatDate=()=> '2026-11-04';
+ const original=context.RD_monday_;
+ const calls=[];
+ context.RD_monday_=(query,variables,p)=>{
+  if(!query.includes('create_notification'))return original(query,variables,p);
+  calls.push(variables.user);
+  if(variables.user==='1')throw Error('Notification transport interrupted');
+  return {create_notification:{text:variables.message}};
+ };
+ const dispatch=()=>context.RD_dispatchWithExistingSender('request-a',null,null,standDownEntry);
+ assert.throws(dispatch,/transport interrupted/);
+ assert.equal(dispatch().notificationsAccepted,1);
+ assert.equal(dispatch().notificationOutcomeUncertain,true);
+ assert.deepEqual(calls,['1','2']);
+ const file=context.DriveApp.getFolderById('state').getFilesByName('request-a.json').next();
+ file.setContent(JSON.stringify({...create(),pendingSubmission:{id:'in-progress'}}));
+ assert.equal(dispatch().state,'blocked');
+ assert.deepEqual(calls,['1','2']);
+});
+test('scheduled stand-down worker previews and enforces the cohort, cut-off and approval',()=>{
+ const {context}=coordinatorHarness();
+ const properties=context.PropertiesService.getScriptProperties();
+ properties.setProperty('RD_STAND_DOWN_USER_IDS','1,2');
+ const cohort=entry=>properties.setProperty('RD_STAND_DOWN_COHORT',JSON.stringify([entry]));
+ context.Utilities.formatDate=()=> '2026-11-04';
+ context.console={log(){}};
+ const original=context.RD_monday_;
+ let calls=0;
+ context.RD_monday_=(query,variables,p)=>{
+  if(!query.includes('create_notification'))return original(query,variables,p);
+  calls++;
+  return {create_notification:{text:variables.message}};
+ };
+ assert.equal(context.RD_runStandDownWorker().state,'disabled');
+ properties.setProperty('RD_STAND_DOWN_ALERTS_APPROVED','YES');
+ cohort({...standDownEntry,revision:2});
+ assert.equal(context.RD_runStandDownWorker().records[0].state,'held');
+ cohort({...standDownEntry,notBefore:'2026-11-04T09:00:00Z'});
+ assert.equal(context.RD_runStandDownWorker().records[0].state,'waiting');
+ cohort(standDownEntry);
+ assert.equal(context.RD_previewStandDownWorker().records[0].state,'would-notify');
+ assert.equal(context.RD_dispatchWithExistingSender(binding.id,null,null).state,'standDown');
+ assert.equal(calls,0);
+ assert.equal(context.RD_runStandDownWorker().records[0].notificationsAccepted,2);
+ assert.equal(context.RD_runStandDownWorker().records[0].notificationsAccepted,2);
+ assert.equal(calls,2);
+});
+test('stand-down trigger installs once with notifications disabled',()=>{
+ const {context}=coordinatorHarness();
+ const handlers=[];
+ context.ScriptApp={
+  getProjectTriggers:()=>handlers.map(handler=>({getHandlerFunction:()=>handler})),
+  newTrigger:handler=>({timeBased:()=>({everyMinutes:minutes=>({create:()=>{
+   assert.equal(minutes,15);
+   handlers.push(handler);
+  }})})}),
+ };
+ assert.equal(context.RD_installStandDownWorkerTrigger().state,'installed-disabled');
+ assert.equal(context.RD_installStandDownWorkerTrigger().state,'already-installed');
+ context.PropertiesService.getScriptProperties().setProperty('RD_STAND_DOWN_ALERTS_APPROVED','YES');
+ assert.throws(()=>context.RD_installStandDownWorkerTrigger(),/Disable stand-down alerts/);
+ assert.deepEqual(handlers,['RD_runStandDownWorker']);
+});
 test('coordinator end-to-end archives and files once, retains comments, rejects RPC replay',()=>{
  const h=coordinatorHarness(),c=command('submit',{id:'request-a',submissionId:'submission-123456',answers,files:[],digest:'digest'});
  let result=h.call(c);assert.equal(result.ok,true,JSON.stringify(result));assert.equal(h.creates,1);assert.equal(h.read().history[0].answers.comments,'Ready');assert.equal(h.read().submitted,true);
