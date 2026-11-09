@@ -28,7 +28,7 @@ The review branch uses the tracker’s existing Europe/London calendar-day offse
 
 Review the warning copy in English, Dutch and German. The planner's stand-down result is a decision signal. Wire the production booking cancellation and Apex stand-down separately and verify both effects before enabling the workflow. A submitted response stops non-response chasers. Outstanding preparations are routed for VM follow-up.
 
-Keep the verified installation and booking revision as the basis for all actions. Late entries use the latest applicable stage and never send a backlog of overdue messages. The final warning is held if its verified MFP or HFP recipient is missing. Set `RD_SOURCE_MAP.hfpEmailColumn` only after verifying the live source. Reconcile old request records with that source before cutover. Never assume that a late warning provided a full notice period.
+Keep the verified installation and booking revision as the basis for all actions. Late entries use the latest applicable stage and never send a backlog of overdue messages. The final warning is held if its verified MFP or HFP recipient is missing. The HFP is resolved from the exact linked Sign Up item’s HFP People field. An empty assignment, team, multiple people or an inactive user cannot supply the final-warning recipient. Verify production user lookup permissions and reconcile old request records before cutover. Never assume that a late warning provided a full notice period.
 
 Record delivery only after independently verified Gmail Sent receipt. Draft creation or a successful send attempt alone is not proof. Keep durable reservations/idempotency and reconcile uncertain results before retrying.
 

@@ -54,9 +54,13 @@ function RD_verifySource_(c,p,previous){
  var links=values[m.installLinkColumn];if(!links||!links.linked_item_ids||links.linked_item_ids.length!==1||String(links.linked_item_ids[0])!==String(binding.itemId))throw Error('Exact installation relationship required');
  var country=market((values[m.countryColumn]||{}).text);if(country!==market(binding.country))throw Error('Market mismatch');
  if(c.operation==='issue'&&((values[m.fzeEmailColumn]||{}).text!==c.fzeEmail||(values[m.mfpEmailColumn]||{}).text!==c.mfpEmail||String(item.name).trim()!==binding.store))throw Error('Recipient/store source mismatch');
- if(c.operation==='issue'&&c.hfpEmail&&(!m.hfpEmailColumn||(values[m.hfpEmailColumn]||{}).text!==c.hfpEmail))throw Error('HFP source mismatch');
  var value=JSON.parse((values[m.installDateColumn]||{}).value||'null');if(!value||value.date!==binding.installDate)throw Error('Install date changed');
- var evidence=RD_projectEvidence_(item,p);
+ var evidence=RD_projectEvidence_(item,p,c.operation==='issue');
+ if(c.operation==='issue'){
+  var verifiedHfp=RD_hfpEmail_(evidence.hfpPersonId,p);
+  if(c.hfpEmail&&c.hfpEmail!==verifiedHfp)throw Error('HFP source mismatch');
+  c.hfpEmail=verifiedHfp;
+ }
  if(binding.projectType!==evidence.projectType||binding.installType!==evidence.installType)throw Error('Invitation context differs from Monday');
  c.sourceVerified=true;c.sourceReference={brainItemId:item.id,verifiedAt:new Date().toISOString(),projectEvidence:evidence};
 }
@@ -121,16 +125,25 @@ function RD_assertCurrent_(record,p){
 }
 
 // Verified schema on 28 October 2026. Exact Brain→Sign Up identity, no name matching.
-function RD_projectEvidence_(brain,p){
+function RD_projectEvidence_(brain,p,includeHfp){
  if(String(brain.board.id)!=='18432365825')throw Error('Project source must be the verified Brain board');
  var v={};brain.column_values.forEach(function(c){v[c.id]=c;});
  var link=v.board_relation_mm7s293s;if(!link||!link.linked_item_ids||link.linked_item_ids.length!==1)throw Error('Exactly one linked Sign Up store required');
- var signup=RD_monday_('query($ids:[ID!]!){items(ids:$ids){id board{id} column_values{id text value}}}',{ids:[String(link.linked_item_ids[0])]},p).items[0];
+ var signup=RD_monday_('query($ids:[ID!]!){items(ids:$ids){id board{id} column_values{id text value ... on PeopleValue{persons_and_teams{id kind}}}}}',{ids:[String(link.linked_item_ids[0])]},p).items[0];
  if(!signup||String(signup.board.id)!=='5678025992')throw Error('Sign Up source identity mismatch');
  var s={};signup.column_values.forEach(function(c){s[c.id]=c;});
  var raw=[(v.color_mm7f7r9d||{}).text,(s.dup__of_store_type5__1||{}).text];
  if((s.label7||{}).text)raw.push(s.label7.text);
- return {projectType:verifiedProjectType(raw),installType:equipmentScopeFromSources((v.dropdown_mm7ftf76||{}).text,[(s.color_mkwjhm4b||{}).text,(s.dup__of_layout_type_bau1__1||{}).text]),brainProjectColumn:'color_mm7f7r9d',signupItemId:String(signup.id),signupOpeningColumn:'dup__of_store_type5__1',signupProjectColumn:'label7',rawLabels:raw};
+ var hfp=(s.people2__1||{}).persons_and_teams||[];
+ var hfpPersonId=includeHfp&&hfp.length===1&&hfp[0].kind==='person'?String(hfp[0].id):'';
+ return {hfpPersonId:hfpPersonId,projectType:verifiedProjectType(raw),installType:equipmentScopeFromSources((v.dropdown_mm7ftf76||{}).text,[(s.color_mkwjhm4b||{}).text,(s.dup__of_layout_type_bau1__1||{}).text]),brainProjectColumn:'color_mm7f7r9d',signupItemId:String(signup.id),signupOpeningColumn:'dup__of_store_type5__1',signupProjectColumn:'label7',rawLabels:raw};
+}
+function RD_hfpEmail_(personId,p){
+ if(!/^\d+$/.test(personId))return '';
+ var users=RD_monday_('query($ids:[ID!]!){users(ids:$ids){id email enabled is_pending}}',{ids:[personId]},p).users;
+ if(!users||users.length!==1||String(users[0].id)!==personId||users[0].enabled!==true||users[0].is_pending!==false)return '';
+ var email=users[0].email||'';
+ return /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(email)?email:'';
 }
 function RD_assertProjectCurrent_(record,p){
  var id=(record.sourceReference||{}).brainItemId;if(!id)throw Error('Verified Brain project binding required');

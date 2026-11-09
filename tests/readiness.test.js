@@ -72,6 +72,35 @@ function coordinatorHarness({failMetadata=false,brainOpening='Retrofit',signupOp
  let n=0;
  return {context,get creates(){return creates;},read:()=>JSON.parse(folders.get('state')[0].contents),call(c,fixedNonce){const nonce=fixedNonce||(++n).toString(16).padStart(64,'0'),timestamp=now,payload=JSON.stringify(c),w={nonce,timestamp,payload,mac:mac('s'.repeat(40),timestamp+'\n'+nonce+'\n'+payload)};return JSON.parse(JSON.parse(context.doPost({postData:{contents:JSON.stringify(w)}})).payload);}};
 }
+test('linked Sign Up HFP resolves only one active, assigned Monday user',()=>{
+ const {context}=coordinatorHarness();
+ const item={board:{id:'18432365825'},column_values:[
+  {id:'board_relation_mm7s293s',linked_item_ids:['43']},
+  {id:'color_mm7f7r9d',text:'Retrofit'},
+  {id:'dropdown_mm7ftf76',text:'Small Format Kiosk'},
+ ]};
+ let hfp=[{id:'7',kind:'person'}];
+ let user={id:'7',email:'hfp@example.test',enabled:true,is_pending:false};
+ context.RD_monday_=(query,variables)=>{
+  if(query.includes('users(')){
+   assert.equal(variables.ids[0],'7');
+   return {users:[user]};
+  }
+  assert.equal(variables.ids[0],'43');
+  return {items:[{id:'43',board:{id:'5678025992'},column_values:[
+   {id:'dup__of_store_type5__1',text:'Retrofit'},
+   {id:'people2__1',persons_and_teams:hfp},
+  ]}]};
+ };
+ const resolve=()=>context.RD_hfpEmail_(context.RD_projectEvidence_(item,null,true).hfpPersonId,null);
+ assert.equal(resolve(),'hfp@example.test');
+ user={...user,enabled:false};
+ assert.equal(resolve(),'');
+ hfp=[{id:'7',kind:'team'}];
+ assert.equal(resolve(),'');
+ hfp=[{id:'7',kind:'person'},{id:'8',kind:'person'}];
+ assert.equal(resolve(),'');
+});
 test('Apps Script final warning rechecks recipients before reserving or sending',()=>{
  const {context}=coordinatorHarness();
  const file=context.DriveApp.getFolderById('state').getFilesByName('request-a.json').next();
