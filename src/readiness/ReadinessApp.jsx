@@ -71,7 +71,7 @@ function Portal({ record, review, onSubmit, onProjectIssue }) {
   const [files, setFiles] = useState([]);
   const [fileBusy, setFileBusy] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
+  const [done, setDone] = useState(!review && Boolean(record.submitted));
   const [showProjectIssue, setShowProjectIssue] = useState(false);
   const [projectIssueReason, setProjectIssueReason] = useState('');
   const [projectIssueSent, setProjectIssueSent] = useState(Boolean(record.projectTypeIssue));
